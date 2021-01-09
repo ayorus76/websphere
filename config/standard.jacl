@@ -1,0 +1,542 @@
+# standard.jacl : default settings for jacl adminweb config scripts
+
+
+# WAS version
+set prm_WAS_VERSION "7.0"
+set prm_WAS_VERSION_NUM ""
+set prm_WAS_EDITION "ND"
+set prm_JVM_BITNESS "64"
+
+set prm_APP_ROOT_VAR_VALUE "/apps/wasapp"
+
+# ******************** SYSTEM PARAMETERS (DO NOT MODIFY)
+set prm_version "6.5"
+
+set prm_dmgrInstallRoot /apps/WebSphere/profiles7/dmgr
+set _index 1
+
+puts "Version : $prm_version"
+set prm_startingPort AUTO
+set prm_portRangeWide 20 
+set prm_nodeTempDir DEFAULT
+set prm_checkPortConflict true
+
+if { $prm_WAS_VERSION == "6.0"  } {
+   set prm_listPortToModify "BOOTSTRAP_ADDRESS CSIV2_SSL_MUTUALAUTH_LISTENER_ADDRESS CSIV2_SSL_SERVERAUTH_LISTENER_ADDRESS \
+   DCS_UNICAST_ADDRESS DUMMY DUMMY DUMMY DUMMY ORB_LISTENER_ADDRESS \
+   SAS_SSL_SERVERAUTH_LISTENER_ADDRESS SOAP_CONNECTOR_ADDRESS \
+   SIB_ENDPOINT_ADDRESS SIB_ENDPOINT_SECURE_ADDRESS SIB_MQ_ENDPOINT_ADDRESS SIB_MQ_ENDPOINT_SECURE_ADDRESS WC_defaulthost"
+
+   set prm_listPortToDelete "WC_adminhost WC_adminhost_secure WC_defaulthost_secure"
+   set prm_listTransportChainToDelete "WCInboundAdmin WCInboundAdminSecure WCInboundDefaultSecure"
+   set prm_sybaseDriverTemplate "Sybase JDBC Driver"
+
+} else {
+   if { $prm_WAS_VERSION == "7.0" || $prm_WAS_VERSION == "8.0" } {
+     set prm_listPortToModify "BOOTSTRAP_ADDRESS CSIV2_SSL_MUTUALAUTH_LISTENER_ADDRESS CSIV2_SSL_SERVERAUTH_LISTENER_ADDRESS \
+     DCS_UNICAST_ADDRESS IPC_CONNECTOR_ADDRESS DUMMY DUMMY SIP_DEFAULTHOST ORB_LISTENER_ADDRESS \
+     DUMMY SOAP_CONNECTOR_ADDRESS \
+     SIB_ENDPOINT_ADDRESS SIB_ENDPOINT_SECURE_ADDRESS SIB_MQ_ENDPOINT_ADDRESS SIB_MQ_ENDPOINT_SECURE_ADDRESS WC_defaulthost \
+     OVERLAY_TCP_LISTENER_ADDRESS OVERLAY_UDP_LISTENER_ADDRESS"
+   } else {
+     set prm_listPortToModify "BOOTSTRAP_ADDRESS CSIV2_SSL_MUTUALAUTH_LISTENER_ADDRESS CSIV2_SSL_SERVERAUTH_LISTENER_ADDRESS \
+     DCS_UNICAST_ADDRESS DUMMY DUMMY DUMMY SIP_DEFAULTHOST ORB_LISTENER_ADDRESS \
+     DUMMY SOAP_CONNECTOR_ADDRESS \
+     SIB_ENDPOINT_ADDRESS SIB_ENDPOINT_SECURE_ADDRESS SIB_MQ_ENDPOINT_ADDRESS SIB_MQ_ENDPOINT_SECURE_ADDRESS WC_defaulthost \
+     OVERLAY_TCP_LISTENER_ADDRESS OVERLAY_UDP_LISTENER_ADDRESS"
+   }
+
+   if { $prm_WAS_EDITION == "ND" } {
+     set prm_listPortToDelete "WC_adminhost WC_adminhost_secure WC_defaulthost_secure SAS_SSL_SERVERAUTH_LISTENER_ADDRESS \
+     SIP_DEFAULTHOST_SECURE"
+   } else {
+     set prm_listPortToDelete "WC_defaulthost_secure SAS_SSL_SERVERAUTH_LISTENER_ADDRESS \
+     SIP_DEFAULTHOST_SECURE"
+   }
+
+   if { $prm_WAS_EDITION == "ND" } {
+     set prm_listTransportChainToDelete "WCInboundAdmin WCInboundAdminSecure WCInboundDefaultSecure SIPCInboundDefaultSecure HttpQueueInboundDefaultSecure"
+   } else {
+     set prm_listTransportChainToDelete "WCInboundDefaultSecure SIPCInboundDefaultSecure HttpQueueInboundDefaultSecure"
+   }
+
+   set prm_nodeTempDir /apps/WebSphere/profiles7/temp
+   set prm_sybaseDriverTemplate "Sybase JDBC 2 Driver"
+   set prm_sybaseDriver3Template "Sybase JDBC 3 Driver"
+}
+
+set prm_perfservletApp bp2i-perfservlet
+set prm_perfservletVH ${prm_perfservletApp}_vh
+if { $prm_WAS_EDITION == "ND" } {
+	set prm_perfservletServer ${prm_perfservletApp}_server
+} else {
+	set prm_perfservletServer server1
+}
+set prm_adminwebApp bp2i-adminweb
+set prm_introscope_custom_service_name "Introscope JMX and PMI Service"
+set prm_introscope_custom_service_class com.wily.introscope.api.websphere.IntroscopeCustomService
+set prm_introscope_property_agentName  "com.wily.introscope.agent.agentName"
+set prm_introscope_property_agentProfile "com.wily.introscope.agentProfile" 
+
+set prm_introscope_default_version "91"
+set prm_introscope_default_directory "/apps/Introscope/Agent_iscope${prm_introscope_default_version}"
+set prm_introscope_default_profile "${prm_introscope_default_directory}/wily/core/config/prod.was.profile"
+
+
+set prm_dynatrace_default_collectorName "dynatrace-mgr.fr.net.intra"
+set prm_dynatrace_default_collectorPort "9998"
+set prm_dynatrace_default_version "42"
+set prm_dynatrace_default_agentPath "/apps/dynatrace${prm_dynatrace_default_version}/agent/lib${prm_JVM_BITNESS}/libdtagent.so"
+
+set prm_instrument_checkJVMScript "${prm_dmgrInstallRoot}/adminweb/tools/instrument_checkJVM.sh"
+set prm_instrument_jvmArgWorkaround "-Xjit:dontInline={java/lang/Object.<init>*},exclude={java/lang/Object.<init>*}"
+
+# ******************** END OF SYSTEM PARAMETERS
+
+# ******************** Appserver (CrAppServer, CrClone, ConfigServer)
+
+# For Base Server only, stop and start should be done with shell
+set prm_stopStartSvradmin "$prm_dmgrInstallRoot/bin/wasadmin"
+
+# for CrAppServer : prm_serverType=S -> stand alone server (default), prm_serverType=C -> Cluster member
+set prm_serverType S
+
+# processus settings
+set prm_processPriority 20
+set prm_umask "022"
+set prm_workingDirectory "\${USER_INSTALL_ROOT}"
+
+# jvm heapsize
+set prm_maximumHeapSize 512
+set prm_initialHeapSize  128
+
+# jvm classpath
+set prm_classpath ""
+
+set prm_jvmClassLoader false
+set prm_jvmClassLoaderMode PARENT_FIRST
+set prm_jvmClassLoaderSharedLibrary ""
+
+# jvm properties
+
+set prm_jvmprop {{\
+   {{name java.awt.headless}{value true}}\
+  }}
+ 
+
+set prm_jvmGenericArguments ""
+set prm_gcPolicy "gencon"
+
+
+# orb client timeout : 30 seconds (instead of 3mn)
+set prm_orbReqTO 30
+set prm_orbLocReqTO 30
+
+# web container properties
+set prm_wcprop {{{{name fileServingEnabled}{value false}}{{name directoryBrowsingEnabled}{value false}}{{name serveServletsByClassnameEnabled}{value false}} {{name com.ibm.ws.webcontainer.invokeFiltersCompatibility}{value true}}}}
+
+# web plugin properties
+
+# connect timeout -> 15 seconds
+set prm_pluginConnectTimeout 15
+
+
+# process environment variables (LIBPATH for example)
+
+set prm_processEnv {{\
+{{name IBM_HEAPDUMP_OUTOFMEMORY}{value false}}\
+{{name IBM_JAVACORE_OUTOFMEMORY}{value false}}\
+{{name IBM_JAVADUMP_OUTOFMEMORY}{value false}}\
+{{name IBM_HEAPDUMPDIR}{value "${SERVER_LOG_ROOT}"}}\
+{{name IBM_JAVACOREDIR}{value "${SERVER_LOG_ROOT}"}}\
+}}
+
+# number of archived log files for SystemOut and SystemErr
+set prm_nbBackupLog 10
+
+# size in Mo of logs files for SystemOut and SystemErr
+set prm_rolloverSize 1
+
+# web container thread pool settings
+set prm_tpwebMaximumSize 50
+set prm_tpwebMinimumSize 10
+set prm_tpwebInactivityTimeout 3500
+set prm_tpwebIsGrowable false
+set prm_webBindingAddress "*"
+
+# HTTP Session persistence : none
+set prm_sessionPersistenceMode N
+
+# orb thread pool settings
+set prm_tporbMaximumSize 50
+set prm_tporbMinimumSize 10
+set prm_tporbInactivityTimeout 3500
+set prm_tporbIsGrowable false
+
+set prm_clientInactivityTimeout 60
+set prm_totalTranLifetimeTimeout 120
+set prm_transactionLogDirectory DEFAULT
+
+# v4.1 (July 2010) -> HAMAnager Service disabled by default 
+# HAManagerService disabled by default
+# enable it if the following services are used : Memory-to-memory replication, Singleton failover, WLM (EJB,JMS)
+
+set prm_enableHAManagerService false
+
+# Java Attach Api disabled by default (CPU consumption problem with WAS 7)
+set prm_enableJavaAttachAPI false
+
+# shared classes settings : D=Default, N=None, C=Custom
+set prm_shared_classes N
+
+# shared classes option (-Xshareclasses:${prm_shared_classes_options}), only if prm_shared_classes=C
+set prm_shared_classes_options "name=webspherev70_%g,groupAccess,nonFatal"
+
+# shared classes size in Mo (-Xscmx${prm_shared_classes_size}M), only if prm_shared_classes=C
+set prm_shared_classes_size 50
+
+set prm_instrumentationType "N"
+
+# introscope
+
+set prm_introscope_agentName "DEFAULT"
+set prm_introscope_version $prm_introscope_default_version
+set prm_introscope_directory $prm_introscope_default_directory
+set prm_introscope_profile $prm_introscope_default_profile
+
+
+# ******************* Cluster
+set prm_sessionReplication false
+set prm_nbClusterMembers 1
+set prm_startIndex 1
+
+# ******************* Dynamic Cluster (XD only)
+
+set prm_dynClusterCustomProperties {{\
+   {{name HttpSessionRebalanceOff}{value true}}\
+  }}
+
+# ******************* WebServer  (CrWebServer)
+set prm_pluginInstallRoot     /apps/WebSphere/WebPlugins7
+set prm_webInstallRoot        /apps/IBMHTTPServer/WebServer7
+# load balancing alogorithm : possible values : ROUND_ROBIN or RANDOM
+set prm_pluginLoadBalance     ROUND_ROBIN 
+set prm_pluginLogLevel        ERROR
+# reload frequency for plugin-cfg.xml file -> 1H
+set prm_pluginRefreshInterval 3600
+# retry frequency for a clone marked down -> 10 mn
+set prm_pluginRetryInterval   600 
+
+# ServerIOTimeout -> 20 mn
+set prm_pluginProperties {{\
+     {{name ServerIOTimeout}{value 1200}}\
+}}
+
+# For Base Server only
+set prm_stopWebServerShell     "$prm_webInstallRoot/https-server1/stop"
+set prm_startWebServerShell    "$prm_webInstallRoot/https-server1/start"
+
+# ******************* Application Deployment
+
+set prm_earFilter true
+set prm_earFilterShell "${prm_dmgrInstallRoot}/adminweb/tools/earFilter.sh"
+
+# if set to true -> session affinity will be disabled (CloneID removed from plugin cfg file) 
+set prm_disableSessionAffinity false
+set prm_disableSessionAffinityShell "${prm_dmgrInstallRoot}/adminweb/tools/removeCloneID.sh"
+
+
+# example : set prm_mapRolesToUser {{"monitor" Yes Yes "" ""}}
+set prm_mapRolesToUsers ""
+
+# possible values for prm_warClassLoaderPolicy : MULTIPLE or SINGLE
+#   MULTIPLE = one class loader by module, SINGLE = a single class loader for the entire application
+set prm_warClassLoaderPolicy MULTIPLE
+
+# possible values for prm_xxxClassLoaderMode = PARENT_FIRST or PARENT_LAST
+set prm_earClassLoaderMode PARENT_FIRST
+set prm_warClassLoaderMode PARENT_FIRST
+
+# if set to true prm_warClassLoaderMode applies to the list of modules specified in prm_wclmSelectedModules
+# if set to false prm_warClassLoaderMode applies to all web modules
+set prm_wclmApplyToSelectedModules false
+
+# if prm_uninstallApp is set to true, all applications deployed on target (server or cluster) will be uninstalled first
+set prm_uninstallAllApp false
+
+set prm_stopWEB true
+set prm_stopWAS true
+# maximum delay in seconds to wait until the servers are stopped. Application servers not stopped after expiration of this delay are terminated (killed).
+set prm_stopWASTimeout 60
+set prm_startWEB true
+set prm_startWAS true
+set prm_deployEJB false
+# deploy EJB classpath : only if prm_deployEJB=true
+set prm_deployEJBClasspath ""
+set prm_precompileJSPs false
+set prm_appSharedLibrary ""
+# if set to true shared librairies are mapped to web modules
+set prm_mapLibsToWebModules false
+
+# sleep duration (1 mn) before restarting was server if prm_startWAS = true
+# workaround to prevent app server server starting before complete synchronization
+set prm_sleepTimeBeforeStartWAS 60000
+
+set prm_overrideSessionMgt false
+set prm_sessionCookieName "JSESSIONID"
+set prm_sessionCookiePath "/"
+set prm_sessionCookieDomain ""
+set prm_sessionCookieTimeout 15
+set prm_sessionCookieMaximumAge -1
+set prm_sessionCookieSecure false
+
+# optional script to execute after installing the application
+set prm_appPostInstallScript ""
+
+
+# ********************* jdbc and MQ
+set prm_description ""
+set prm_category ""
+
+# ******************** variable
+set prm_varDesc ""
+
+# ********************* shared library
+set prm_libNativePath ""
+# isolated class loader : >= WAS 7.0 only
+set prm_libIsolatedClassLoader false
+
+# ******************* jdbc datasource settings 
+set prm_statement_cache_size 60
+set prm_connection_timeout 60
+set prm_max_connections 20
+set prm_min_connections 0
+# purge policy : true -> entire pool, false -> failing connection only
+set prm_purgeEntirePool true
+set prm_reap_time 180
+set prm_unused_timeout 1800
+set prm_aged_timeout 0
+# par defaut : data source non xa
+set prm_xaEnabled false 
+# prm_oracle_version : 9 or 10
+set prm_oracle_version 9
+# prm_sybase_version : 2 (jconn2) or 3 (jconn3) jconn3 is supported only for WAS 6.1
+set prm_sybase_driverVersion "2"
+# isolation level of transaction datasource properties value "DEFAULT" let websphere set his default = 4 (TRANSACTION_REPEATABLE_READ)
+set prm_defaultIsolationLevel "DEFAULT" 
+# JAAS alias not set by default -> preferred way : set during deployment
+set prm_auth_alias_name ""
+
+# ****************** URL
+set prm_defaultURLProvider "Default URL Provider"
+
+
+# ******************* MQ settings
+# possible values for prm_mq_transportType : B or C
+#   B = Bindings (Server mode), C = Client (in this case a channel must be specified)
+set prm_mq_transportType B
+set prm_mq_xaEnabled false
+set prm_mq_CCSID ""
+set prm_mq_targetClient JMS
+# possible values for prm_mq_persistence : APPLICATION_DEFINED, PERSISTENT, QUEUE_DEFINED, NONPERSISTENT
+set prm_mq_persistence APPLICATION_DEFINED
+
+# *** MQ connection pool
+set prm_mq_con_connection_timeout 60
+set prm_mq_con_max_connections 20
+set prm_mq_con_min_connections 0
+set prm_mq_con_reap_time 180
+set prm_mq_con_unused_timeout 1800
+set prm_mq_con_aged_timeout 0
+
+# ** MQ session pool
+set prm_mq_ses_connection_timeout 60
+set prm_mq_ses_max_connections 20
+set prm_mq_ses_min_connections 0
+set prm_mq_ses_reap_time 180
+set prm_mq_ses_unused_timeout 1800
+set prm_mq_ses_aged_timeout 0
+
+# ** Listener port
+set prm_lp_maxRetries 0
+set prm_lp_maxSessions 1
+set prm_lp_maxMessages 1
+
+
+# ** possible values for prm_lp_initialState : START or STOP
+
+set prm_lp_initialState START
+
+
+# ====================  Global function ================================
+
+# renvoie le port d'un serveur d'application
+proc getServerPort {nodeName serverName endPointName} {
+  global AdminConfig
+  set nodeId [$AdminConfig getid /Node:$nodeName/]
+  if {$nodeId == ""} {
+    return -1
+  }
+  set serverEntries [$AdminConfig list ServerEntry $nodeId]
+  foreach serverEntry $serverEntries {
+    set sName [$AdminConfig showAttribute $serverEntry serverName]
+    if { $sName == $serverName } {
+      set specialEndPoints [lindex [$AdminConfig showAttribute $serverEntry specialEndpoints] 0]
+      foreach specialEndPoint $specialEndPoints {
+        set endPointNm [$AdminConfig showAttribute $specialEndPoint endPointName]
+        set ePoint [$AdminConfig showAttribute $specialEndPoint endPoint]
+        set port [$AdminConfig showAttribute $ePoint port]
+        if { $endPointNm == $endPointName } {
+           return [$AdminConfig showAttribute $ePoint port]
+        }
+      } 
+    }
+  }
+  return -1
+}
+
+# renvoie le host et le port d'un serveur d'application
+proc getServerHostPort {nodeName serverName endPointName} {
+  global AdminConfig
+  set nodeId [$AdminConfig getid /Node:$nodeName/]
+  if {$nodeId == ""} {
+    return ""
+  }
+  set serverEntries [$AdminConfig list ServerEntry $nodeId]
+  foreach serverEntry $serverEntries {
+    set sName [$AdminConfig showAttribute $serverEntry serverName]
+    if { $sName == $serverName } {
+      set specialEndPoints [lindex [$AdminConfig showAttribute $serverEntry specialEndpoints] 0]
+      foreach specialEndPoint $specialEndPoints {
+        set endPointNm [$AdminConfig showAttribute $specialEndPoint endPointName]
+        set ePoint [$AdminConfig showAttribute $specialEndPoint endPoint]
+        set port [$AdminConfig showAttribute $ePoint port]
+        if { $endPointNm == $endPointName } {
+           return [list [$AdminConfig showAttribute $ePoint host] [$AdminConfig showAttribute $ePoint port]]
+        }
+      }
+    }
+  }
+  return ""
+}
+
+
+# modifie le port d'un serveur d'application
+proc setServerPort {nodeName serverName endPointName newPort} {
+  global AdminConfig
+  set nodeId [$AdminConfig getid /Node:$nodeName/]
+  if {$nodeId == ""} {
+    return -1
+  }
+  set serverEntries [$AdminConfig list ServerEntry $nodeId]
+  foreach serverEntry $serverEntries {
+    set sName [$AdminConfig showAttribute $serverEntry serverName]
+    if { $sName == $serverName } {
+      set specialEndPoints [lindex [$AdminConfig showAttribute $serverEntry specialEndpoints] 0]
+      foreach specialEndPoint $specialEndPoints {
+        set endPointNm [$AdminConfig showAttribute $specialEndPoint endPointName]
+        set ePoint [$AdminConfig showAttribute $specialEndPoint endPoint]
+        set port [$AdminConfig showAttribute $ePoint port]
+        if { $endPointNm == $endPointName } {
+           $AdminConfig modify $ePoint [list [list port $newPort]]
+           return 0
+        }
+      }
+    }
+  }
+  return -1
+}
+
+
+proc getServerHTTPPort {nodeName serverName} {
+  return [getServerPort $nodeName $serverName "WC_defaulthost"]
+}
+
+proc setServerHTTPPort {nodeName serverName newPort} {
+  return [setServerPort $nodeName $serverName "WC_defaulthost" $newPort]
+}
+
+proc retNbFound { a_nb nbFound } {
+  if { $a_nb == "*" } {
+    if { $nbFound > 0 } {
+      return 1
+    } else {
+      return 0
+    }
+  }
+  if { $nbFound == $a_nb } {
+    return 1
+  } else {
+    return 0
+  }
+}
+
+proc checkExistsVirtualHost {a_vhName a_nb} {
+  global AdminConfig
+  set nbFound 0
+  foreach vh [$AdminConfig list VirtualHost] {
+    set vhName [$AdminConfig showAttribute $vh name]
+    if { $vhName == $a_vhName } {
+      incr nbFound  
+    }
+  }
+  return [retNbFound $a_nb $nbFound]
+}
+
+proc checkExistsApp {a_app a_nb} {
+  global AdminApp
+  set nbFound 0
+  foreach app [$AdminApp list] {
+    if { $app == $a_app } {
+      incr nbFound
+    }
+  }
+  return [retNbFound $a_nb $nbFound]
+}
+
+proc checkExistsServer {a_node a_server a_nb} {
+  global AdminConfig
+  set nbFound 0
+  set idNode ""
+  if { $a_node != "" } {
+    set idNode [$AdminConfig getid /Node:$a_node/]
+  }
+  if { $idNode == "" } {
+    set servers [$AdminConfig list Server]
+  } else {
+    set servers [$AdminConfig list Server $idNode]
+  }
+  foreach server $servers {
+    set srvName [$AdminConfig showAttribute $server name]
+    if { $srvName == $a_server } {
+      incr nbFound
+    }
+  }
+  return [retNbFound $a_nb $nbFound]
+}
+
+proc getServerNode {a_server} {
+  global AdminConfig
+  set srvFound ""
+  foreach nodeObject [$AdminConfig list Node] {
+    set node [$AdminConfig showAttribute $nodeObject name]
+    set srvFound [$AdminConfig getid /Node:$node/Server:$a_server]
+    if { $srvFound != ""} {
+      return $node
+    }
+  }
+  return ""
+}
+
+proc isWAS6X {} {
+  global prm_WAS_VERSION
+
+  if { [string first "6." $prm_WAS_VERSION"] == 0 } {
+    return 1
+  } else {
+    return 0
+  } 
+}
+
+set prm_logType "B"
+set prm_javacoredir "/apps/core/javacore"

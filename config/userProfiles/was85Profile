@@ -1,0 +1,7 @@
+export USER="was85"
+export prm_WAS_VERSION="85"
+export DMGR_DIR="/apps/WebSphere/profiles85/dmgr"
+export ADMINWEB="/apps/WebSphere/profiles85/dmgr/adminweb/config"
+export prm_WEB_SERVER_DIR="/apps/IBMHTTPServer/WebServer85"
+export prm_PLUGIN_DIR="/apps/WebSphere/WebPlugins85"
+export prm_NODE_DIR="/apps/WebSphere/profiles85/node"

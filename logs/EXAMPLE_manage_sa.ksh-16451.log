@@ -1,0 +1,74 @@
+Script version : 2.6
+
+==> Initialization of application server parameters before creation (EAR_NAME, MODULE_NAME, MEMORY etc...)
+
+==> Creation of application tree
+WARNING : le dossier "/applis/exploit/scripts/fro_servicesreferentiels-03" existe deja.
+
+==> Copy of scripts set
+
+==> Copy of jython/jacl librairies and variables
+
+==> Try to contact manager, please wait ...
+WASX7209I: Connected to process "dmgr" on node parva2420372Manager using SOAP connector;  The type of process is: DeploymentManager
+WASX7303I: The following options are passed to the scripting environment and are available as arguments that are stored in the argv variable: "[/home/was85/bin/managesa/livraisons/16451.props]"
+
+==> Start creation of sa "sa-fro_servicesreferentiels-biz-03" on node "parva2420372" from template "default"
+Server sa-fro_servicesreferentiels-biz-03 already exists
+Server sa-fro_servicesreferentiels-biz-03 initialized
+myServerName : sa-fro_servicesreferentiels-biz-03
+Port parameter setting : AUTO
+Find starting port for new SA sa-fro_servicesreferentiels-biz-03
+Maximum port found : 13140
+Port range : 20
+New port starting at : 13160
+Verifying possible port conflict...
+Setting TCP ports...
+===> Setting ports (deleting some useless ports : WC_adminhost WC_adminhost_secure WC_defaulthost_secure SAS_SSL_SERVERAUTH_LISTENER_ADDRESS SIP_DEFAULTHOST_SECURE) ...
+
+
+Removing transport chain WCInboundAdmin WCInboundAdminSecure WCInboundDefaultSecure SIPCInboundDefaultSecure HttpQueueInboundDefaultSecure...
+Setting JVM parameters...
+Setting memory heap size to : 128/512 Mo (Initial / Max)
+Setting generic arguments to : -Duser.languagefr -noverify -Xshareclasses:none -Xgcpolicy:gencon
+Setting classpath to : /applis/08606-fro00-fr/was/sa-fro_servicesreferentiels-biz-03/conf/fro_servicesreferentiels/properties/log4j
+Setting ORB properties
+- Request timeout to : 30
+- Locate request timeout to : 30
+Setting JVM properties...
+Proprietes pour la JVM : [[['name', 'java.awt.headless'], ['value', 'true']], [['name', 'client.encoding.override'], ['value', 'UTF-8']], [['name', 'Log4j.OUTPUT_DIR'], ['value', '/applis/logs/08606-fro00-fr/was/sa-fro_servicesreferentiels-biz-03']], [['name', 'com.ibm.websphere.servlet.temp.dir'], ['value', '/applis/08606-fro00-fr/was/sa-fro_servicesreferentiels-biz-03/temp']]]
+Setting nb backup logs...
+Setting webContainer properties : 
+Proprietes pour le Web Container : [[['name', 'fileServingEnabled'], ['value', 'true']], [['name', 'serveServletsByClassnameEnabled'], ['value', 'false']], [['name', 'directoryBrowsingEnabled'], ['value', 'false']], [['name', 'com.ibm.ws.webcontainer.invokeFiltersCompatibility'], ['value', 'true']]]
+Setting web server plugin properties...
+Setting process Environement : [[['name', 'IBM_HEAPDUMP_OUTOFMEMORY'], ['value', 'false']], [['name', 'IBM_JAVACORE_OUTOFMEMORY'], ['value', 'false']], [['name', 'IBM_JAVADUMP_OUTOFMEMORY'], ['value', 'false']], [['name', 'IBM_HEAPDUMPDIR'], ['value', '${SERVER_LOG_ROOT}']], [['name', 'IBM_JAVACOREDIR'], ['value', '${SERVER_LOG_ROOT}']]]
+Setting process Execution properties
+Setting WebContainer thread pool properties
+Setting transaction service properties : inactivity timeout = 60, transaction timeout = 1200
+Setting tranlog directory : /apps/WebSphere/profiles85/node/tranlog/parva2420372Network/parva2420372/sa-fro_servicesreferentiels-biz-03/transaction/tranlog
+Disabling HAManager Service
+Adding property "com.ibm.tools.attach.enable" set to "no" for server sa-fro_servicesreferentiels-biz-03
+Setting working directory to '${USER_INSTALL_ROOT}'
+Setting logs root...
+Valeur de logType : B
+replacing SERVER_LOG_ROOT by /applis/logs/08606-fro00-fr
+Setting WC_defaulthost host to *...
+
+VIRTUAL HOST creation...
+Nom du VH : fro_servicesreferentiels-biz-03_vh
+Valeurs par defaut :
+servicesreferentiels-integration3-assurance.dev.echonet / 8081
+servicesreferentiels-integration3-assurance.dev.echonet / 9443
+START
+Similar virtual host already exists
+NOT DONE
+
+SHARED LIBRARY creation ...
+Creation of the library,"fro_servicesreferentiels-biz-03_shared",pour parva2420372/sa-fro_servicesreferentiels-biz-03
+Shared library "fro_servicesreferentiels-biz-03_shared" already exists !
+NOT DONE
+
+Server Web /Node:parva2420372/Server:sw-fro_servicesreferentiels-biz-03/ already exists
+NOT DONE
+
+End of the script : status 0

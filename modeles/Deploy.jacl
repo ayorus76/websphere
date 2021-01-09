@@ -1,0 +1,352 @@
+source [lindex $argv 0]/common.jacl
+
+puts "START"
+
+if {$prm_mapLibsToWebModules == "true" && $prm_WAS_VERSION == "6.0"} {
+  puts "ERROR : Option prm_mapLibsToWebModules not supported in version 6.0"
+  exit 1
+}
+
+# recuperation du nom de la cellule
+set cell [$AdminConfig list Cell]
+set endIndex [expr [string first "(" $cell] - 1]
+set cellName [string range $cell 0 $endIndex]
+
+if {$prm_earFilter == "true"} {
+  puts "Filtering ear $prm_ear ... with $prm_earFilterShell"
+  exec "$prm_earFilterShell" "$prm_ear"
+}
+
+if {$prm_scope == "C" || $prm_scope == "CH"} {
+  set clusterId [$AdminConfig getid /ServerCluster:$prm_clusterName/]
+  if {$clusterId == ""} {
+    puts "ERROR : cluster $prm_clusterName does not exist"
+    exit 1
+  }
+} elseif {$prm_scope == "S" || $prm_scope == "SH"} {
+  set serverId [$AdminConfig getid /Node:$prm_nodeName/Server:$prm_serverName]
+  if {$serverId == ""} {
+    puts "ERROR : server $prm_serverName does not exist on node $prm_nodeName"
+    exit 1
+  }
+}
+
+if { ($prm_scope == "CH" || $prm_scope == "SH") && ($prm_stopWEB == "true") } {
+#ARRET des serveurs web
+  set i 0
+  while {$i < [llength $prm_webServerList]} {
+    set node [lindex [lindex $prm_webServerList $i] 0]
+    set server [lindex [lindex $prm_webServerList $i] 1]
+    puts "Stopping WebServer $server on node $node"
+    #set w [$AdminControl completeObjectName WebSphere:type=WebServer,process=dmgr,cell=$cellName,*]
+    # For Base Server
+    if { $prm_WAS_EDITION == "BASE" } {
+      set w [$AdminControl completeObjectName WebSphere:type=WebServer,process=server1,cell=$cellName,*]
+    } else {
+      set w [$AdminControl completeObjectName WebSphere:type=WebServer,process=dmgr,cell=$cellName,*]
+    }
+    puts "---------------->> $w"
+    # For Base Server
+    if { $prm_WAS_EDITION == "BASE" } {
+      puts "exec $prm_stopWebServerShell"
+      # exec "$prm_stopWebServerShell"
+      if { [ catch { exec "$prm_stopWebServerShell" } { result } ] } {
+         puts "$server on node $node is not running"
+      }
+
+    } else {
+      if { [ catch { $AdminControl invoke $w stop [subst { $cellName $node $server} ] } result ] } {
+         puts "Error when stopping $server on node $node : $result"
+      }
+    }
+    set i [expr $i + 1]
+  }
+}
+
+# arret des server was
+if {$prm_stopWAS == "true"} {
+  # For Base Server, do not stop Server now
+  if { $prm_WAS_EDITION == "ND" } {
+    set listServers ""
+    if {$prm_scope == "C" || $prm_scope == "CH"} {
+      puts "Stopping cluster $prm_clusterName..."
+      set clusterId [$AdminConfig getid /ServerCluster:$prm_clusterName/]
+      set clusterMembers [$AdminConfig list ClusterMember $clusterId]
+      set clusterSize [llength $clusterMembers]
+      for {set i 0} {$i < $clusterSize} {incr i 1} {
+        set member [lindex $clusterMembers $i]
+        set serverName [$AdminConfig showAttribute $member memberName]
+        set nodeName [$AdminConfig showAttribute $member nodeName]
+        lappend listServers [list $nodeName $serverName]
+      }
+    } elseif {$prm_scope == "S" || $prm_scope == "SH"} {
+      puts "Stopping server $prm_serverName..."
+      lappend listServers [list $prm_nodeName $prm_serverName]
+    }
+    stopAppServers $listServers $prm_stopWASTimeout
+  }
+}
+
+if { $prm_app == "" } {
+  set prm_app [getAppNameFromEar $prm_ear]
+  puts "Application Name extracted from ear : '$prm_app'"
+}	
+
+if { $prm_uninstallAllApp != "true" } {
+  # recherche si l'appli est deja installee
+  puts "search appli..."
+  set appList [$AdminApp list]
+  puts "... $appList"
+
+  foreach app $appList {
+    if { [string compare $app $prm_app] == 0 } {
+      set appExist $app
+      break
+    }
+  }
+
+  puts "uninstall appli..."
+  # desinstallation si deja installee
+  if { [info exists appExist] } {
+    $AdminApp uninstall $prm_app
+    puts "Application uninstalled"
+  }
+}
+
+if { $prm_uninstallAllApp == "true" } {
+  if {$prm_scope == "C" || $prm_scope == "CH"} {
+    puts "Uninstalling all applications targeted on cluster $prm_clusterName"
+    uninstallAppOnCluster $prm_clusterName
+  } else {
+    puts "Uninstalling all applications target on server $prm_nodeName / $prm_serverName"
+    uninstallAppOnServer $prm_nodeName $prm_serverName
+  }
+}
+
+# specific options processing
+
+if {$prm_deployEJB == "true"} {
+  if {$prm_deployEJBClasspath != ""} {
+	set optDeployEJB "-deployejb -deployejb.classpath $prm_deployEJBClasspath"
+  } else {
+	set optDeployEJB "-deployejb"
+  }
+} else {
+  set optDeployEJB ""
+}
+
+puts "optDeployEJB=$optDeployEJB"
+
+if {$prm_precompileJSPs == "true"} {
+  set optPrecompileJSPs "-preCompileJSPs"
+} else {
+  set optPrecompileJSPs ""
+}
+
+# application installation
+  
+puts "installing appli..."
+
+if {$prm_installDir == "DEFAULT"} {
+$AdminApp install $prm_ear [ subst {-usedefaultbindings -defaultbinding.strategy.file $prm_bnd -appname $prm_app $optDeployEJB $optPrecompileJSPs}]
+} else {
+$AdminApp install $prm_ear [ subst {-usedefaultbindings -defaultbinding.strategy.file $prm_bnd -appname $prm_app -installed.ear.destination $prm_installDir $optDeployEJB $optPrecompileJSPs}]
+}
+
+if {$prm_mapRolesToUsers != ""} {
+  puts "Mapping security roles : $prm_mapRolesToUsers"
+  $AdminApp edit $prm_app [subst {-MapRolesToUsers $prm_mapRolesToUsers}]
+}
+
+
+#preparation du deploiement
+if {($prm_scope == "CH") || ($prm_scope == "C")} {
+  set toStart "WebSphere:cell=$cellName,cluster=$prm_clusterName"
+} else {
+  set toStart "WebSphere:cell=$cellName,node=$prm_nodeName,server=$prm_serverName"
+}
+
+if {($prm_scope == "CH") || ($prm_scope == "SH")} {
+  set i 0
+  
+  while {$i < [llength $prm_webServerList]} {
+    set node [lindex [lindex $prm_webServerList $i] 0]
+    set server [lindex [lindex $prm_webServerList $i] 1]
+    puts "==> $node + $server"
+    set toStart $toStart+WebSphere:cell=$cellName,node=$node,server=$server
+    set i [expr $i + 1]
+  }
+}
+puts $toStart
+set mod [$AdminApp view $prm_app {-MapModulesToServers}]
+set bindex [expr [string first "Module:  " $mod] + 9]
+set eindex [expr [string first "\nURI:  " $mod] - 1]
+set bi2 [expr $eindex + 8]
+set ei2 [expr [string first "\nServer:  " $mod] -1]
+while {$eindex >-1} {
+  set warAppName [string range $mod $bindex $eindex]
+  puts "-----> $warAppName"
+  set warFileName [string range $mod $bi2 $ei2]
+  puts "-----> $warFileName"
+  set mod [string range $mod $eindex [expr [string length $mod] + 10]]
+  set bindex [expr [string first "Module:  " $mod] + 9]
+  set mod [string range $mod $bindex [expr [string length $mod] + 10]]
+  set bindex 0
+  set eindex [expr [string first "URI:  " $mod] - 1]
+  set bi2 [expr $eindex + 7]
+  set ei2 [expr [string first "\nServer:  " $mod] -1]
+  puts ">> \"$warAppName\" \"$warFileName\" "
+  $AdminApp edit $prm_app [ subst { -MapModulesToServers {{\"$warAppName\" \"$warFileName\" $toStart}} }]
+}
+
+setWarClassLoaderPolicy $prm_app $prm_warClassLoaderPolicy
+setEarClassLoaderMode $prm_app $prm_earClassLoaderMode
+
+if { $prm_wclmApplyToSelectedModules == "true" } {
+  setWarClassLoaderModeSelected $prm_app $prm_warClassLoaderMode $prm_wclmSelectedModules
+} else {
+  setWarClassLoaderMode $prm_app $prm_warClassLoaderMode
+}
+
+if {$prm_appSharedLibrary != ""} {
+  if {$prm_mapLibsToWebModules == "true"} {
+    setAppSharedLibraryForModules $prm_app $prm_appSharedLibrary
+  } else {
+    setAppSharedLibrary $prm_app $prm_appSharedLibrary
+  }
+}
+
+if {$prm_overrideSessionMgt == "true"} {
+  overrideSessionMgtApp $prm_app $prm_sessionCookieName $prm_sessionCookieDomain $prm_sessionCookiePath $prm_sessionCookieTimeout $prm_sessionCookieMaximumAge $prm_sessionCookieSecure
+}
+
+if { [info exists prm_appPostInstallScript] && $prm_appPostInstallScript != "" } {
+  puts "executing post-installation script : $prm_appPostInstallScript ..."
+  source $prm_appPostInstallScript
+}
+
+
+
+# sauvegarde de la config
+$AdminConfig save
+puts "Application $prm_app installed with success in $prm_installDir"
+
+
+if {$prm_scope == "SH" || $prm_scope == "CH"} {
+# regeneration du plug-in ihs
+puts "regenerate plugin..."
+#set pluginGen [$AdminControl completeObjectName type=PluginCfgGenerator,process=dmgr,*]
+# For Base Server
+if { $prm_WAS_EDITION == "BASE" } {
+  set pluginGen [$AdminControl completeObjectName type=PluginCfgGenerator,process=server1,*]
+} else {
+  set pluginGen [$AdminControl completeObjectName type=PluginCfgGenerator,process=dmgr,*]
+}
+
+
+set i 0
+while {$i < [llength $prm_webServerList]} {
+  set node [lindex [lindex $prm_webServerList $i] 0]
+  set server [lindex [lindex $prm_webServerList $i] 1]
+  $AdminControl invoke $pluginGen generate "$prm_dmgrInstallRoot/config $cellName $node $server true"
+  set i [expr $i + 1]
+}
+
+puts "Plug-in configuration file generated"
+}
+
+if {$prm_disableSessionAffinity == "true"} {
+  if {$prm_scope == "SH" || $prm_scope == "CH"} {
+    set i 0
+    while {$i < [llength $prm_webServerList]} {
+       set node [lindex [lindex $prm_webServerList $i] 0]
+       set server [lindex [lindex $prm_webServerList $i] 1]
+       puts "Disabling session affinity for web server $node/$server"
+       exec "$prm_disableSessionAffinityShell" "$node" "$server"
+       set i [expr $i + 1]
+    }
+    # correctif par Sylvain Noyon le 10 Mars : comme on modifie le fichier de plugin directement dans le repertoire
+    # on force un refreshRepositoryEpoch
+    #set configRepos [$AdminControl queryNames type=ConfigRepository,process=dmgr,*]
+    # For Base Server
+    if { $prm_WAS_EDITION == "BASE" } {
+      set configRepos [$AdminControl queryNames type=ConfigRepository,process=server1,*]
+    } else {
+      set configRepos [$AdminControl queryNames type=ConfigRepository,process=dmgr,*]
+    }
+
+    $AdminControl invoke $configRepos refreshRepositoryEpoch
+  }
+
+}
+
+
+
+
+# synchro de la cellule
+foreach node_sync [$AdminControl queryNames type=NodeSync,process=nodeagent,*] {
+  puts "Synchronization of node $node_sync"
+  $AdminControl invoke $node_sync sync
+}
+
+if {$prm_startWAS == "true"} {
+    puts "sleeping for $prm_sleepTimeBeforeStartWAS milliseconds before starting WAS"
+    after $prm_sleepTimeBeforeStartWAS
+    if {$prm_scope == "S" || $prm_scope == "SH"} {
+      puts "Starting server $prm_serverName"
+      # For Base Server
+      if { $prm_WAS_EDITION == "BASE" } {
+         puts "exec $prm_stopStartSvradmin stop"
+         exec "$prm_stopStartSvradmin" "stop"
+         puts "exec $prm_stopStartSvradmin start"
+         exec "$prm_stopStartSvradmin" "start"
+         # Wait a while
+         puts "sleeping for $prm_sleepTimeBeforeStartWAS milliseconds after starting server"
+         after $prm_sleepTimeBeforeStartWAS
+      } else {
+        $AdminControl startServer $prm_serverName $prm_nodeName
+      }
+    } else {
+      set clusterId [$AdminConfig getid /ServerCluster:$prm_clusterName/]
+      puts "clusterId : $clusterId"
+      set cmembers [lindex [lindex [$AdminConfig show $clusterId {members}] 0] 1]
+
+
+      # redemarrage du cluster
+      puts "Starting cluster $prm_clusterName"
+      foreach clusterMember $cmembers {
+        set nodeName [$AdminConfig showAttribute $clusterMember nodeName]
+        set memberName [$AdminConfig showAttribute $clusterMember memberName]
+        set nodeId [$AdminControl queryNames type=Server,node=$nodeName,process=nodeagent,*]
+        if {$nodeId == ""} {
+          puts "WARNING : unable to start server $memberName on node $nodeName -> node agent not running"
+        } else {
+          $AdminControl startServer $memberName $nodeName
+          puts "Instance $memberName started"
+        }
+      }
+   }
+}
+
+if {$prm_scope == "SH" || $prm_scope == "CH"} {
+    if {$prm_startWEB == "true"} {
+        set i 0
+	while {$i < [llength $prm_webServerList]} {
+	  set node [lindex [lindex $prm_webServerList $i] 0]
+	  set server [lindex [lindex $prm_webServerList $i] 1]
+	  puts "Starting WebServer $server on node $node"
+
+          # For Base Server
+          if { $prm_WAS_EDITION == "BASE" } {
+            puts "exec $prm_startWebServerShell"
+            exec "$prm_startWebServerShell"
+          } else {
+	    if { [ catch { $AdminControl startServer $server $node } result ] } {
+	      puts "Error when starting $server on node $node : $result"
+	    }
+          }
+	  set i [expr $i + 1]
+	}
+    }
+}
+puts "DONE"

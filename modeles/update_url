@@ -1,0 +1,7 @@
+#!/bin/ksh
+
+echo ""
+echo "url${indice}.URL_TYPE_ACTION=update"
+echo "url${indice}.URL_JNDI_APPLI=url/"
+echo "url${indice}.URL_SPEC="
+echo ""

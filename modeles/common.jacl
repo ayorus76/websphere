@@ -1,0 +1,1461 @@
+#######################################################################
+# Logging
+#######################################################################
+set WARNING 1
+set DEBUG 0
+set INFO 1
+set ERROR 1
+set TIME_FORMAT "%m/%d/%Y %H:%M:%S"
+
+#######################################################################
+# Do not change these
+#######################################################################
+proc printConsole { message } {
+ 		 puts $message
+}
+proc printError { message } {
+		 global ERROR
+		 global TIME_FORMAT
+		 if { $ERROR == 1 } {
+		 		 puts "[clock format [clock seconds] -format "$TIME_FORMAT"] \[AdminWeb\]  \[ERROR\] $message"
+		 }
+}
+proc printInfo { message } {
+		 global INFO
+		 global TIME_FORMAT
+		 if { $INFO == 1 } {
+		 		 puts "[clock format [clock seconds] -format "$TIME_FORMAT"] \[AdminWeb\] \[INFO\] $message"
+		 }
+}
+proc printWarning { message } {
+		 global WARNING
+		 global TIME_FORMAT
+		 if { $WARNING == 1 } {
+		 		 puts "[clock format [clock seconds] -format "$TIME_FORMAT"] \[AdminWeb\]  \[WARN\] $message"
+		 }
+}
+proc printDebug { message } {
+		 global DEBUG
+		 global TIME_FORMAT
+		 if { $DEBUG == 1 } {
+		 		 puts "[clock format [clock seconds] -format "$TIME_FORMAT"] \[AdminWeb\] \[DEBUG\] $message"
+		 }
+}
+
+proc getAppNameFromEar {earFile} {
+  global AdminApp
+
+  set infoApp [$AdminApp taskInfo $earFile AppDeploymentOptions]
+  set bindex [expr [string first "\nApplication name: " $infoApp] + 19]
+  set eindex [expr [string first "\nCreate MBeans for resources: " $infoApp] -1]
+  set appName [string range $infoApp $bindex $eindex]
+  return $appName
+}
+proc getXDAppNameFromEar {earFile} {
+  global AdminApp
+
+  set infoApp [$AdminApp taskInfo $earFile AppDeploymentOptions]
+  set bindex [expr [string first "\nApplication name: " $infoApp] + 19]
+  set eindex [expr [string first "\nApplication edition: " $infoApp] -1]
+  set appName [string range $infoApp $bindex $eindex]
+  return $appName
+}
+proc isAppDeployedOnTarget {appName scope nodeName serverName clusterName} {
+  global AdminConfig
+
+  set deployment [$AdminConfig getid /Deployment:$appName/]
+  set depObject [$AdminConfig showAttribute $deployment deployedObject]
+  set targetMaps [lindex [$AdminConfig showAttribute $depObject targetMappings] 0]
+  foreach targetMap $targetMaps {
+    set target [$AdminConfig showAttribute $targetMap target]
+    if {$scope == "C" && [regexp "ClusteredTarget" $target]} {
+      set targetClusterName [$AdminConfig showAttribute $target name]
+      if { $targetClusterName == $clusterName } {
+        return 1
+      }
+    } elseif {$scope == "S" && [regexp "ClusteredTarget" $target] != 1 } {
+      set targetServerName [$AdminConfig showAttribute $target name]
+      set targetNodeName [$AdminConfig showAttribute $target nodeName]
+      if { $targetServerName == $serverName && $targetNodeName == $nodeName } {
+        return 1
+      }
+    }
+  }
+  return 0
+}
+
+
+proc uninstallAppOnTarget {scope nodeName serverName clusterName} {
+  global AdminApp
+
+  set appList {}
+
+  foreach app [$AdminApp list] {
+    if { ($scope == "C" && [isAppDeployedOnTarget $app "C" "" "" $clusterName]) || \
+         ($scope == "S" && [isAppDeployedOnTarget $app "S" $nodeName $serverName ""]) } {
+      set appList [linsert $appList end $app]
+    }
+  }
+  foreach app $appList {
+    puts "Uninstall $app"
+    $AdminApp uninstall $app
+  }
+}
+
+proc uninstallAppOnServer {nodeName serverName} {
+  uninstallAppOnTarget "S" $nodeName $serverName ""
+}
+
+proc uninstallAppOnCluster {clusterName} {
+  uninstallAppOnTarget "C" "" "" $clusterName
+}
+
+
+proc setWarClassLoaderPolicy {appName policy} {
+   global AdminConfig
+
+   if { $policy != "MULTIPLE" && $policy != "SINGLE" } {
+     puts "ERROR : possible values for classLoaderPolicy = MULTIPLE | SINGLE"
+     exit 1
+   }
+
+   set idApp [$AdminConfig getid /Deployment:$appName/]
+   set dep [$AdminConfig showAttribute $idApp deployedObject]
+   $AdminConfig modify $dep [subst {{warClassLoaderPolicy $policy}}]
+   puts "warClassLoaderPolicy set to $policy"
+}
+
+proc setAppSharedLibrary {appName appSharedLibrary} {
+  global AdminConfig AdminControl AdminApp
+  puts "==============================================================="
+  puts "Creating shared library reference ${appSharedLibrary}"
+  puts "==============================================================="
+  set deploymentId [ $AdminConfig getid /Deployment:$appName ]
+  set deployedObject [ $AdminConfig showAttribute $deploymentId deployedObject ]
+  set appclassloaders [ $AdminConfig showAttribute $deployedObject classloader ]
+  set classLoader [lindex $appclassloaders 0]
+  foreach libname ${appSharedLibrary} {
+  	set sharedlibref [ list [ list libraryName ${libname} ] [list sharedClassloader true ] ]
+  	$AdminConfig create LibraryRef ${classLoader} ${sharedlibref} 
+  }
+}
+
+proc classloaderContainsLib {classloader libName} {
+    global AdminConfig AdminControl AdminApp
+        set libRefList [ $AdminConfig list LibraryRef $classloader ]
+        foreach i $libRefList {
+                if { $libName == [ $AdminConfig showAttribute $i libraryName ] }  {        
+                   return 1
+                }
+        }
+        return 0        
+}
+
+proc setAppSharedLibraryForModules {appName appSharedLibrary} {
+ global AdminConfig AdminControl AdminApp
+  puts "====================================================================="
+  puts "Creating shared library reference ${appSharedLibrary} for web modules"
+  puts "====================================================================="
+  set deploymentId [ $AdminConfig getid /Deployment:$appName ]
+  set webModuleDeploymentList [ $AdminConfig list WebModuleDeployment $deploymentId ]
+  foreach webModuleDeployment $webModuleDeploymentList {
+    puts "Updating web module [ $AdminConfig showAttribute $webModuleDeployment uri ]"
+        set webModuleClassLoader [ $AdminConfig showAttribute $webModuleDeployment classloader ]
+        if { $webModuleClassLoader== "" } {
+           puts "creating classloader for webModule webModuleDeployment"
+           $AdminConfig create Classloader $webModuleDeployment [ list [ list mode PARENT_FIRST ] ]
+        }
+        set webModuleClassLoader [ $AdminConfig showAttribute $webModuleDeployment classloader ]
+        foreach libname ${appSharedLibrary} {
+          if { ! [ classloaderContainsLib ${webModuleClassLoader} ${libname} ] } {   
+             puts "Adding library ${libname} to webModule classloader"
+         set sharedlibref [ list [ list libraryName ${libname} ] [list sharedClassloader true ] ]
+         $AdminConfig create LibraryRef ${webModuleClassLoader} ${sharedlibref}
+      } else {
+         puts "Web module classloader already contains lib ${libname} ... do noting"
+      }
+    }
+  }
+}
+
+proc overrideSessionMgtApp {appName cookieName cookieDomain cookiePath cookieTimeout cookieMaxAge cookieSecure} {
+  global AdminConfig
+  puts "Overriding Session Management"
+  set deploymentId [ $AdminConfig getid /Deployment:$appName ]
+  set appDeploy [ $AdminConfig showAttribute $deploymentId deployedObject ]
+  set attr1 [list enable true]
+  set attr2 [list enableCookies true]
+  set attr3 [list accessSessionOnTimeout false]
+  set cookieAttrs [list [list maximumAge $cookieMaxAge]]
+  lappend cookieAttrs [list name $cookieName] 
+  lappend cookieAttrs [list path $cookiePath]
+  lappend cookieAttrs [list secure $cookieSecure]
+  if {$cookieDomain != ""} {
+    lappend cookieAttrs [list domain $cookieDomain]
+  }
+  set cookieSettings [list defaultCookieSettings $cookieAttrs]
+  set tpAttrs [list [list invalidationTimeout $cookieTimeout]]
+  set tuningParams [list tuningParams $tpAttrs]
+  set attrs [list $attr1 $attr2 $attr3 $tuningParams $cookieSettings]
+  
+  set configs [lindex [$AdminConfig showAttribute $appDeploy configs] 0]
+  set appConfig [lindex $configs 0]
+  set SM ""
+  if {$appConfig != ""} {
+    set SM [$AdminConfig showAttribute $appConfig sessionManagement]
+  }
+
+  if {$SM == ""} { 
+    set sessionMgr [list sessionManagement $attrs]
+    puts "Creating Session Manager : $sessionMgr"
+    set idAppConfig [$AdminConfig create ApplicationConfig $appDeploy [list $sessionMgr]]
+    set targetMappings [lindex [$AdminConfig showAttribute $appDeploy targetMappings] 0]
+    set attrs [list config $idAppConfig]
+    # Sylvain Noyon - 17/02/2009 - Correction d'un bug pour eFinances
+    # pour le cas ou l'appli est deployee sur plusieurs cibles (ex: 1IHS+1WAS)
+    foreach tm $targetMappings {
+      $AdminConfig modify $tm [list $attrs]
+    }
+  } else {
+    puts "Updating session Manager : $sessionMgr"
+    $AdminConfig modify $SM $attrs
+  } 
+}
+
+
+proc setEarClassLoaderMode {appName clMode} {
+   global AdminConfig
+
+   if { $clMode != "PARENT_FIRST" && $clMode != "PARENT_LAST" } {
+     puts "ERROR : possible values for earClassLoaderMode = PARENT_FIRST | PARENT_LAST"
+     exit 1
+   }
+
+   set idApp [$AdminConfig getid /Deployment:$appName/]
+   set dep [$AdminConfig showAttribute $idApp deployedObject]
+   set classLoaderAttr [$AdminConfig showAttribute $dep classloader]
+   $AdminConfig modify $classLoaderAttr [subst {{mode $clMode}}]
+   puts "EAR class loader mode set to $clMode"
+}
+
+
+proc setSystemProperty {serverId prm_nodeTempDir} {
+  global AdminConfig
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  $AdminConfig create Property $jvm [subst {{name "com.ibm.websphere.servlet.temp.dir"}{value $prm_nodeTempDir}{required false}}]
+}
+proc setSystemProperty1 {prm_dClustName prm_nodeTempDir} {
+global AdminConfig
+
+set Cell [$AdminConfig list Cell]
+set ind2 [expr [string first "(" $Cell] - 1]
+set ind3 0
+set Cell [string range $Cell $ind3 $ind2]
+set serverId [$AdminConfig getid /Cell:$Cell/DynamicCluster:$prm_dClustName/Server:$prm_dClustName/]
+set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+puts "$jvm"
+$AdminConfig create Property $jvm [subst {{name "com.ibm.websphere.servlet.temp.dir"}{value $prm_nodeTempDir}{required false}}]
+}
+
+
+proc setWarClassLoaderMode {appName clMode} {
+  global AdminConfig 
+
+  if { $clMode != "PARENT_FIRST" && $clMode != "PARENT_LAST" } {
+     puts "ERROR : possible values for warClassLoaderMode = PARENT_FIRST | PARENT_LAST"
+     exit 1
+   }
+
+   set idApp [$AdminConfig getid /Deployment:$appName/]
+   set webModules [$AdminConfig list WebModuleDeployment $idApp]
+   foreach webModule $webModules {
+     set webModuleUri [$AdminConfig showAttribute $webModule uri]
+     $AdminConfig modify $webModule [subst {{classloaderMode $clMode}}]
+     puts "class loader mode set to $clMode for module $webModuleUri"
+   }
+}
+
+proc setWarClassLoaderModeSelected {appName clMode selectedModules} {
+  global AdminConfig
+
+  if { $clMode != "PARENT_FIRST" && $clMode != "PARENT_LAST" } {
+     puts "ERROR : possible values for warClassLoaderMode = PARENT_FIRST | PARENT_LAST"
+     exit 1
+   }
+
+   if { $clMode == "PARENT_FIRST" } {
+     set clModeUnselected "PARENT_LAST"
+   } else {
+     set clModeUnselected "PARENT_FIRST"
+   }
+
+
+   set idApp [$AdminConfig getid /Deployment:$appName/]
+   set webModules [$AdminConfig list WebModuleDeployment $idApp]
+   foreach webModule $webModules {
+     set webModuleUri [$AdminConfig showAttribute $webModule uri]
+     if { [lsearch -exact $selectedModules $webModuleUri] != -1  } {
+       $AdminConfig modify $webModule [subst {{classloaderMode $clMode}}]
+       puts "class loader mode set to $clMode for module $webModuleUri"
+     } else {
+       $AdminConfig modify $webModule [subst {{classloaderMode $clModeUnselected}}]
+       puts "class loader mode set to $clModeUnselected for module $webModuleUri"
+     }
+   }
+}
+
+
+
+proc checkServerParameters {} {
+global prm_nodeName prm_serverName prm_serverLogRoot
+global AdminConfig
+if { ![info exists prm_nodeName ] || $prm_nodeName == "" } {
+  puts "ERROR : Missing Parameter 'prm_nodeName'"
+  exit 1
+}
+
+if { ![info exists prm_serverName ] || $prm_serverName == "" } {
+  puts "ERROR : Missing Parameter 'prm_serverName'"
+  exit 1
+}
+
+if { ![info exists prm_serverLogRoot ] || $prm_serverLogRoot == "" } {
+  puts "ERROR : Missing Parameter 'prm_serverLogRoot'"
+  exit 1
+}
+
+set nodeId [$AdminConfig getid /Node:$prm_nodeName/]
+if {$nodeId == ""} {
+  puts "ERROR : Node name $prm_nodeName return no node"
+  exit 1
+}
+}
+
+
+proc findPort {x y} {
+set i 0
+while {$i < [llength $x]} {
+        if {$y == [lindex $x $i]} {
+                return $i
+        }
+        set i [expr $i + 1]
+}
+return -1
+}
+
+proc setJVM1 {serverId prm_initialHeapSize prm_maximumHeapSize prm_jvmprop prm_classPath prm_jvmGenericArguments} {
+  global AdminConfig
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  $AdminConfig modify $jvm [subst {{initialHeapSize $prm_initialHeapSize} {maximumHeapSize $prm_maximumHeapSize}}]
+  $AdminConfig modify $jvm {{systemProperties {}}}
+  $AdminConfig modify $jvm [subst {{systemProperties $prm_jvmprop}}]
+  
+  if { $prm_jvmGenericArguments == "" } {
+     $AdminConfig modify $jvm {{genericJvmArguments ""}}
+  } else {
+    $AdminConfig modify $jvm [subst {{genericJvmArguments \"$prm_jvmGenericArguments\"}}]
+  }
+  
+  if { $prm_classPath == "" } {
+    $AdminConfig modify $jvm {{classpath ""}}
+  } else {
+    puts "Setting classpath to $prm_classPath"
+    $AdminConfig modify $jvm [subst {{classpath $prm_classPath}}]
+  }
+}
+
+proc setORB {serverId prm_orbReqTO prm_orbLocReqTO was_version} {
+global AdminConfig
+set orb [$AdminConfig list ObjectRequestBroker $serverId]
+$AdminConfig modify $orb [subst {{requestTimeout $prm_orbReqTO} {locateRequestTimeout $prm_orbLocReqTO}}]
+  if { $was_version != "6.0" } {
+     $AdminConfig modify $orb [subst {{useServerThreadPool true}}]
+  }
+}
+
+proc setLogs {prm_nodeName prm_serverName prm_serverLogRoot} {
+global AdminConfig
+global prm_logType
+puts "valeur de logType $prm_logType"
+
+set varmap [$AdminConfig getid /Node:$prm_nodeName/Server:$prm_serverName/VariableMap:/]
+set vslist [lindex [lindex [$AdminConfig show $varmap] 0] 1]
+foreach vs $vslist {
+	set sName [$AdminConfig showAttribute $vs symbolicName]
+	puts "sName $sName"
+	if { [string compare SERVER_LOG_ROOT $sName] == 0 } {
+		puts "replacing $sName by $prm_serverLogRoot"
+		$AdminConfig modify $vs [subst {{value $prm_serverLogRoot}}]
+   		}
+  	}
+if { $prm_logType == "H" } {
+	set HPELService [$AdminConfig getid /Node:$prm_nodeName/Server:$prm_serverName/HighPerformanceExtensibleLogging:/]
+	$AdminConfig modify $HPELService [subst {{enable true}}]
+	set RASLogging [$AdminConfig getid /Node:$prm_nodeName/Server:$prm_serverName/RASLoggingService:/]
+	$AdminConfig modify $RASLogging [subst {{enable false}}]
+
+	#set HPELLog [$AdminConfig list HPELLog $HPELService]
+	#$AdminConfig modify $HPELLog [subst {{dataDirectory $prm_serverLogRoot}}]
+
+	#set HPELTrace [$AdminConfig list HPELTrace $HPELService]
+	#$AdminConfig modify $HPELTrace [subst {{dataDirectory $prm_serverLogRoot}}]
+
+	set HPELTextLog [$AdminConfig list HPELTextLog $HPELService]
+	#$AdminConfig modify $HPELTextLog [subst {{dataDirectory $prm_serverLogRoot}}]
+	$AdminConfig modify $HPELTextLog [subst {{enabled false}}]
+ }
+}
+
+
+proc setNodeTempDir {prm_nodeName prm_serverName prm_nodeTempDir} {
+global AdminConfig
+set vdescription "WAS temporary directory"
+set varmap [$AdminConfig getid /Node:$prm_nodeName/Server:$prm_serverName/VariableMap:/]
+$AdminConfig create VariableSubstitutionEntry $varmap [subst {{symbolicName WAS_TEMP_DIR}{value $prm_nodeTempDir}{description "$vdescription"}}]
+}
+proc setNodeTempDirxd {prm_nodeName prm_serverName prm_nodeTempDir} {
+global AdminConfig
+set vdescription "WAS temporary directory"
+set varmap [$AdminConfig getid /Node:$prm_nodeName/Server:$prm_serverName/VariableMap:/]
+$AdminConfig create VariableSubstitutionEntry $varmap [subst {{symbolicName WAS_TEMP_DIR}{value $prm_nodeTempDir}{description "$vdescription"}}]
+}
+
+proc setBckup {serverId prm_nbBackupLog rolloverSize} {
+global AdminConfig
+global prm_logType
+puts "valeur de logType $prm_logType"
+if { $prm_logType == "B" } {
+	set outputStream [$AdminConfig showAttribute $serverId outputStreamRedirect]
+	$AdminConfig modify $outputStream [subst {{maxNumberOfBackupFiles $prm_nbBackupLog} {rolloverSize $rolloverSize}}]
+	set errorStream [$AdminConfig showAttribute $serverId errorStreamRedirect]
+	$AdminConfig modify $errorStream [subst { {maxNumberOfBackupFiles $prm_nbBackupLog} {rolloverSize $rolloverSize}}]
+ }
+}
+
+proc setHost {serverEntry hostName} {
+  global AdminConfig
+  set specialEndPoints [lindex [$AdminConfig showAttribute $serverEntry specialEndpoints] 0]
+  foreach specialEndPoint $specialEndPoints {
+    set ePoint [$AdminConfig showAttribute $specialEndPoint endPoint]
+    $AdminConfig modify $ePoint [subst {{host $hostName}}]
+    set value [$AdminConfig show $ePoint]
+  }
+}
+
+
+proc setPort {serverEntry array_PortToModify array_PortToDelete startingPort} {
+global AdminConfig
+#puts [$AdminConfig attributes Server]
+#puts [$AdminConfig show $serverEntry]
+#exit
+ set specialEndPoints [lindex [$AdminConfig showAttribute $serverEntry specialEndpoints] 0]
+ #Configure les ports
+ foreach specialEndPoint $specialEndPoints {
+    set endPointNm [$AdminConfig showAttribute $specialEndPoint endPointName]
+    set ePoint [$AdminConfig showAttribute $specialEndPoint endPoint]
+    set myhost [$AdminConfig showAttribute $ePoint host]
+    set portMod [findPort $array_PortToModify $endPointNm]
+    set portDel [findPort $array_PortToDelete $endPointNm]
+    if {$portMod > -1} {
+#                               puts "endPointNm : $endPointNm set port to : [expr $startingPort + $portMod]"
+            $AdminConfig modify $ePoint [list [list host $myhost] [list port [expr $startingPort + $portMod]]]
+    } elseif  {$portDel > -1} {
+#                             puts "endPointNm : $endPointNm remove"
+            $AdminConfig remove $specialEndPoint
+    } else {
+#                               puts "WARNING :  endPointNm : $endPointNm unknown"
+    }
+#                       puts "endPointNm : $endPointNm       host : $myhost [findPort $array_PortToModify $endPointNm]"
+  }
+}
+
+proc checkPort {serverEntry startingPort} {
+global AdminConfig
+ set specialEndPoints [lindex [$AdminConfig showAttribute $serverEntry specialEndpoints] 0]
+ foreach specialEndPoint $specialEndPoints {
+    set endPointNm [$AdminConfig showAttribute $specialEndPoint endPointName]
+    set ePoint [$AdminConfig showAttribute $specialEndPoint endPoint]
+    set port [$AdminConfig showAttribute $ePoint port]
+
+#    puts "--- $startingPort ---- $endPointNm ---- $port"
+    if {$startingPort == $port || [expr $startingPort + 10] == $port } {
+#puts "[$AdminConfig show $serverEntry]"
+      puts "ERROR: port range $startingPort already in use by server [$AdminConfig showAttribute $serverEntry serverName] by $endPointNm : $port"
+      exit 1
+    }
+
+ }
+}
+
+proc findMaxPort {serverEntries myServerName} {
+  global AdminConfig 
+  set mxPort 0
+  puts "findMaxPort $myServerName"
+  foreach serverEntry $serverEntries {
+    set sName [$AdminConfig showAttribute $serverEntry serverName]
+    puts "findMaxPort $myServerName -> $sName"
+    set sType  [$AdminConfig showAttribute $serverEntry serverType]
+    if { $sType != "WEB_SERVER"  && $sName != $myServerName } {
+      set specialEndPoints [lindex [$AdminConfig showAttribute $serverEntry specialEndpoints] 0]
+      if { $specialEndPoints != "" } {
+        set specialEndPoint [lindex [lindex [$AdminConfig showAttribute $serverEntry specialEndpoints] 0] 0]
+        set endPointNm [$AdminConfig showAttribute $specialEndPoint endPointName]
+        set ePoint [$AdminConfig showAttribute $specialEndPoint endPoint]
+        set port [$AdminConfig showAttribute $ePoint port]
+        if { $mxPort < $port } {
+          set mxPort $port
+        }
+      }
+    }
+  }
+  return $mxPort
+}
+
+proc setWebContainerProps {serverId prm_wcprop} {
+   global AdminConfig
+   set wc [$AdminConfig list WebContainer $serverId]
+   $AdminConfig modify $wc {{properties {}}}
+   $AdminConfig modify $wc [subst {{properties $prm_wcprop}}]
+}
+
+proc setEnv {serverId prm_processEnv} {
+  global AdminConfig
+  set processDef [$AdminConfig list ProcessDef $serverId]
+  $AdminConfig modify $processDef {{environment {}}}
+  $AdminConfig modify $processDef [subst {{environment $prm_processEnv}}]
+}
+
+# normalisation des ports pour toute la cellule
+proc normalizePortsCell {} {
+  global AdminConfig AdminTask prm_checkPortConflict
+
+  foreach nodeId [$AdminConfig list Node] {
+    set nodeName [$AdminConfig showAttribute $nodeId name]
+    foreach serverId [$AdminConfig list Server $nodeId] {
+      set sType  [$AdminConfig showAttribute $serverId serverType]
+      if { $sType == "APPLICATION_SERVER" } {
+        set serverName [$AdminConfig showAttribute $serverId name]
+	set portAdmin [getServerPort $nodeName $serverName SAS_SSL_SERVERAUTH_LISTENER_ADDRESS]
+        if { $portAdmin != -1 } {
+          puts "Reset BOOTSTRAP port for server $nodeName/$serverName"
+          $AdminTask modifyServerPort $serverName [subst {-nodeName $nodeName -endPointName BOOTSTRAP_ADDRESS -port 0}]
+        }
+      }
+    }
+  }
+
+  set prm_checkPortConflict false
+  foreach nodeId [$AdminConfig list Node] {
+    set serverEntries [$AdminConfig list ServerEntry $nodeId]
+    set nodeName [$AdminConfig showAttribute $nodeId name]
+    foreach serverId [$AdminConfig list Server $nodeId] {
+      set sType  [$AdminConfig showAttribute $serverId serverType]
+      if { $sType == "APPLICATION_SERVER" } {
+        set serverName [$AdminConfig showAttribute $serverId name]
+	set portAdmin [getServerPort $nodeName $serverName SAS_SSL_SERVERAUTH_LISTENER_ADDRESS]
+        if { $portAdmin != -1 } {
+          puts "Normalizing ports for server $nodeName/$serverName"
+          setServerPorts $serverId $serverEntries
+        }
+      }
+    }
+  }
+}
+
+
+proc setServerPorts {serverId serverEntries} {
+  global AdminConfig prm_listPortToModify prm_listPortToDelete prm_startingPort prm_checkPortConflict
+  global prm_listTransportChainToDelete prm_portRangeWide
+
+  set myServerName [$AdminConfig showAttribute $serverId name]
+  set startingPort $prm_startingPort
+  if {$startingPort == "AUTO"} {
+    set mPort [findMaxPort $serverEntries $myServerName]
+    set startingPort [expr $mPort + $prm_portRangeWide]
+  }
+  puts "prm_checkPortConflict=$prm_checkPortConflict"
+  if { $prm_checkPortConflict  == "true" } {
+    puts "Verifying possible port conflict..."
+    puts "xxxxx"
+    foreach serverEntry $serverEntries {
+          set sName [$AdminConfig showAttribute $serverEntry serverName]
+          if {$sName != $myServerName} {
+                #Configure les ports
+                puts "Checking ports..."
+                checkPort $serverEntry $startingPort
+          }
+    }
+  }
+
+  if {$prm_listTransportChainToDelete != ""} {
+    puts "removing transport chain..."
+    set tpservs [$AdminConfig list Chain $serverId]
+    foreach tpserv $tpservs {
+      set toDel [findPort $prm_listTransportChainToDelete [$AdminConfig showAttribute $tpserv name]]
+      if {$toDel > -1} {
+        puts "removing $tpserv"
+        set transportChannels [lindex [$AdminConfig showAttribute $tpserv transportChannels] 0]
+        foreach tc $transportChannels {
+          puts "removing $tc"
+          $AdminConfig remove $tc
+        } 
+        $AdminConfig remove $tpserv
+      }
+    }
+  }
+
+  #Parcours les serveurs pour trouver notre serveur
+  puts "setting tcp ports..."
+  foreach serverEntry $serverEntries {
+        set sName [$AdminConfig showAttribute $serverEntry serverName]
+        if {$sName == $myServerName} {
+                #Configure les ports
+                puts "Setting ports..."
+                setPort $serverEntry $prm_listPortToModify $prm_listPortToDelete $startingPort
+        }
+  }
+}
+
+proc setProcessExecution {serverId} {
+  global AdminConfig
+  global prm_processPriority prm_umask
+
+  set processDef [$AdminConfig list ProcessDef $serverId]
+  set processExec [$AdminConfig showAttribute $processDef execution]
+  $AdminConfig modify $processExec [subst {{processPriority $prm_processPriority} {umask $prm_umask}}]
+}
+
+proc removeRMIConnector {serverId} {
+     global AdminConfig
+     set rmiConn [$AdminConfig list RMIConnector $serverId]
+     #$AdminConfig remove $rmiConn
+     if { $rmiConn != "" } {
+       $AdminConfig remove $rmiConn
+     }
+}
+
+proc setThreadPoolProperties {tp inactivityTimeout isGrowable maximumSize minimumSize} {
+  global AdminConfig
+  $AdminConfig modify $tp [subst {{inactivityTimeout $inactivityTimeout}\
+  {isGrowable $isGrowable}{maximumSize $maximumSize}{minimumSize $minimumSize}}]
+}
+
+
+proc setJVMCustomProperty {serverId propName propValue} {
+  global AdminConfig
+  set serverName [$AdminConfig showAttribute $serverId name]
+  set attrs [list [list name $propName] [list value $propValue]]
+  set findProp "false"
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  foreach propid [$AdminConfig list Property $jvm] {
+    set tmpName [$AdminConfig showAttribute $propid name]
+    if {[string compare $tmpName $propName] == 0} {
+      set findProp "true"
+      set tmpValue [$AdminConfig showAttribute $propid value]
+      if {[string compare $tmpValue $propValue] == 0} {
+        puts "Property '$propName' already set to '$propValue' for server '$serverName'"
+      } else {
+        puts "Setting property '$propName' to '$propValue' for server '$serverName'"
+        $AdminConfig modify $propid $attrs
+      }
+    }
+  }
+  #  la propriete n'est pas definie -> on l'ajoute
+  if { $findProp == "false" } {
+    puts "Adding property '$propName' set to '$propValue' for server '$serverName'"
+    $AdminConfig create Property $jvm $attrs
+  }
+}
+
+
+proc removeJVMCustomProperty {serverId propName} {
+  global AdminConfig
+  set serverName [$AdminConfig showAttribute $serverId name]
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  set findProp "false"
+  foreach propid [$AdminConfig list Property $jvm] {
+    set tmpName [$AdminConfig showAttribute $propid name]
+    if {[string compare $tmpName $propName] == 0} {
+      set findProp "true"
+      puts "Removing property '$propName' for server '$serverName'"
+      $AdminConfig remove $propid
+    }
+  }
+  if { $findProp == "false" } {
+    puts "Property '$propName' is not set for server '$serverName' !"
+  }
+}
+
+proc getJVMCustomProperty {serverId propName} {
+  global AdminConfig
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  set findProp "false"
+  foreach propid [$AdminConfig list Property $jvm] {
+    set tmpName [$AdminConfig showAttribute $propid name]
+    if {[string compare $tmpName $propName] == 0} {
+      return [$AdminConfig showAttribute $prodid value]
+    }
+  }
+  return ""
+}
+
+
+
+proc enableCustomPMI { serverId } {
+  global AdminConfig
+
+  puts "Enabling customized PMI "
+  set pmiService [$AdminConfig list PMIService $serverId]
+  set pmiRoot [$AdminConfig list PMIModule $serverId]
+  set packedModules [$AdminConfig showAttribute $pmiRoot pmimodules]
+  set modification [ $AdminConfig modify $pmiService {{enable true} {statisticSet custom}}]
+  set moduleList [split [lindex $packedModules 0] " "]
+  foreach module $moduleList {
+    set moduleName [$AdminConfig showAttribute $module moduleName]
+    set moduleEnabled [$AdminConfig showAttribute $module enable]
+  }
+  foreach module $moduleList {
+    set moduleName [$AdminConfig showAttribute $module moduleName]
+    if { $moduleName == "beanModule" } {
+      # Enterprise Beans
+      #      LiveCount,LoadTime,PooledCount,ReadyCount
+      #      ServerSessionPoolUsage,StoreTime,WaitTime
+      set modification [$AdminConfig modify $module "{enable 35,34,26,25,12,11,9,2,1,10,32,29,33,28}"]
+    } elseif { $moduleName == "connectionPoolModule" } {
+      # JDBC Connection Pools
+      #      AllocateCount,FreePoolSize,JDBCTime,UseTime
+      #      WaitingThreadCount,WaitTime
+      set modification [$AdminConfig modify $module "{enable 13,12,9,7,6,5,2,1,3,22}"]
+    } elseif { $moduleName == "orbPerfModule" } {
+      # ORB
+      #     ConcurrentRequestCount,LookupTime,ProcessingTime
+      #     RequestCount
+      set modification [$AdminConfig modify $module "{enable 3,1,2}"]
+    } elseif { $moduleName == "servletSessionsModule" } {
+      # Servlet Session Manager
+      #     ActiveCount,ExternalReadTime,ExternalWriteTime
+      #     LiveCount,SessionObjectSize
+      set modification [$AdminConfig modify $module "{enable 17,6,14,9,1,11,10,13,12,2,4,7,8,18,15,16}"]
+    } elseif { $moduleName == "threadPoolModule" } {
+      # Thread Pools
+      #     ActiveCount,CreateCount,DestroyCount
+      #     PercentMaxed,PoolSize
+      set modification [$AdminConfig modify $module "{enable 4,3,1,2,5}"]
+    } elseif { $moduleName == "transactionModule" } {
+      # Transaction Manager
+      #     ActiveCount,GlobalTranTime,GlobalTimeoutCount
+      #     LocalActiveCount,LocalTranTime,LocalTimeoutCount
+      set modification [$AdminConfig modify $module "{enable 16,14,4,18,6,5,19,7}"]
+    } elseif { $moduleName == "webAppModule" } {
+      # Web Applications
+      #     ConcurrentRequests,ErrorCount
+      #     LoadedServletCount,ReloadCount
+      set modification [$AdminConfig modify $module "{enable 15,13,11,17,12,14,1,2}"]
+    }
+  }
+}
+
+
+
+ 
+
+proc setAttachAPI {serverId flag} {
+  global AdminConfig
+
+  set propName "com.ibm.tools.attach.enable"
+  if { $flag == "true" } {
+    set propValue "yes"
+  } else {
+    set propValue "no"
+  }
+  setJVMCustomProperty $serverId $propName $propValue
+}
+
+
+proc introscope_removeCustomService { serverId } {
+   global AdminConfig
+   global   prm_introscope_custom_service_class
+   
+   foreach service [$AdminConfig list CustomService $serverId] {
+      set className [$AdminConfig showAttribute $service classname]
+      if { $className == $prm_introscope_custom_service_class} {
+         puts "Removing Introscope custom service"
+         $AdminConfig remove $service
+      }
+   }
+
+}
+
+proc introscope_createCustomService { serverId iscope_dir } {
+  global AdminConfig
+  global prm_introscope_custom_service_name prm_introscope_custom_service_class
+
+  if { [regexp {.*82$} $iscope_dir] } {
+	set serviceClassPath ${iscope_dir}/wily/WebAppSupport.jar
+	puts " ${iscope_dir}/wily/WebAppSupport.jar"
+  }	else {
+	set serviceClassPath ${iscope_dir}/wily/common/WebAppSupport.jar
+	puts " ${iscope_dir}/wily/common/WebAppSupport.jar"
+  }
+  
+  
+
+  puts "Creating custom service ${prm_introscope_custom_service_name}"
+ 
+  set optionString "{classname \"${prm_introscope_custom_service_class}\"}"
+  append optionString "{enable true}"
+  append optionString "{classpath \"${serviceClassPath}\"}"
+  append optionString "{displayName \"${prm_introscope_custom_service_name}\"}"
+  set customService [$AdminConfig create CustomService $serverId $optionString ]   
+}
+
+proc instrument_clearJVMarguments { jvm } {
+  global AdminConfig prm_instrument_jvmArgWorkaround
+
+  
+  set jvmargument [$AdminConfig showAttribute $jvm genericJvmArguments]
+  if { $jvmargument != "" } {
+    set jvmargumentEntries [split $jvmargument " "]
+    set jvmargumentClear ""
+    
+    foreach arg $jvmargumentEntries {
+      if {$arg != "" && [regexp  "introscope|wily|dynatrace|libdtagent" $arg]==0 && [string first "-agentpath:" $arg]!=0 && $arg != $prm_instrument_jvmArgWorkaround } {
+        append jvmargumentClear "$arg" " "
+      }
+    }
+    
+    set jvmargument "{ genericJvmArguments \"$jvmargumentClear\" }"   
+    $AdminConfig modify $jvm $jvmargument
+  }
+}
+
+proc sharedClasses_clearJVMarguments { jvm } {
+  global AdminConfig
+
+
+  set jvmargument [$AdminConfig showAttribute $jvm genericJvmArguments]
+  if { $jvmargument != "" } {
+    set jvmargumentEntries [split $jvmargument " "]
+    set jvmargumentClear ""
+
+    foreach arg $jvmargumentEntries {
+      if {$arg != ""} {
+       if { [string first "-Xshareclasses" $arg]!=0 && [string first "-Xscmx" $arg]!=0 } {
+         append jvmargumentClear "$arg" " "
+       }
+      }
+    }
+
+    set jvmargument "{ genericJvmArguments \"$jvmargumentClear\" }"
+    $AdminConfig modify $jvm $jvmargument
+  }
+}
+
+proc setGcPolicy { serverId gcpolicy} {
+  global AdminConfig
+
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  set jvmargument [$AdminConfig showAttribute $jvm genericJvmArguments]
+  set jvmargumentClear ""
+  if { $jvmargument != "" } {
+    set jvmargumentEntries [split $jvmargument " "]
+
+    foreach arg $jvmargumentEntries {
+      if {$arg != ""} {
+       if { [string first "-Xgcpolicy:" $arg]!=0 } {
+         append jvmargumentClear "$arg" " "
+       }
+      }
+    }
+  }
+  if { $gcpolicy != "default" } {
+    if { $jvmargumentClear == "" } {
+      set $jvmargumentClear "-Xgcpolicy:$gcpolicy"
+    } else {
+      append jvmargumentClear " -Xgcpolicy:$gcpolicy"
+    }
+  }
+
+   puts "GCPolicy : setting genericJvmArguments to '$jvmargumentClear'"
+
+  if { $jvmargumentClear == "" } {
+     $AdminConfig modify $jvm {{genericJvmArguments ""}}
+  } else {
+    $AdminConfig modify $jvm [subst {{genericJvmArguments \"$jvmargumentClear\"}}]
+  }
+}
+
+
+proc appendJVMArguments { jvm arg} {
+   global AdminConfig
+
+   set jvmargument [$AdminConfig showAttribute $jvm genericJvmArguments]
+   if { $jvmargument  == "" } {
+     set newArguments $arg 
+   } else {
+      set newArguments $jvmargument
+      append newArguments " " $arg
+   }
+   set jvmargument "{ genericJvmArguments \"$newArguments\" }"   
+   $AdminConfig modify $jvm $jvmargument
+}   
+
+proc enableIntroscopeInternal { serverId introscopeAgentName introscopeDirectory introscopeProfile } {
+  global AdminConfig prm_introscope_property_agentName prm_introscope_property_agentProfile
+  global prm_introscope_default_directory prm_introscope_default_profile
+
+  if { $introscopeAgentName == "DEFAULT" || $introscopeAgentName == "_" } {
+    set introscopeAgentName "\${WAS_SERVER_NAME}"
+  }
+
+  if { $introscopeDirectory == "DEFAULT" || $introscopeDirectory == "_" } {
+    set introscopeDirectory $prm_introscope_default_directory
+  } elseif { [regexp {^[1-9][0-9]$} $introscopeDirectory] } {
+    set introscopeDirectory "/apps/Introscope/Agent_iscope${introscopeDirectory}"
+  }
+  if { $introscopeProfile == "DEFAULT" || $introscopeProfile == "_" } {
+	if { [regexp {.*82.*} $introscopeDirectory] } {
+    		set introscopeProfile "${introscopeDirectory}/wily/prod.was.profile"
+	} else {
+    		set introscopeProfile "${introscopeDirectory}/wily/core/config/prod.was.profile"
+	}
+
+  } elseif { [regexp {^([A-Za-z]:|/)} $introscopeProfile] == 0 } {
+	if { [regexp {.*82.*} $introscopeDirectory] } {
+    		set introscopeProfile "${introscopeDirectory}/wily/$introscopeProfile"
+	} else {
+    		set introscopeProfile "${introscopeDirectory}/wily/core/config/$introscopeProfile"
+	}
+
+  }
+
+  disableInstrument $serverId 
+
+  set serverName [$AdminConfig showAttribute $serverId name]
+  puts "Enabling introscope instrumentation for server '$serverName'"
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  appendJVMArguments $jvm "-javaagent:${introscopeDirectory}/wily/Agent.jar"
+  applyInstrumentWorkaround $jvm
+  introscope_createCustomService $serverId $introscopeDirectory
+  
+  
+  setJVMCustomProperty $serverId $prm_introscope_property_agentName $introscopeAgentName
+  setJVMCustomProperty $serverId $prm_introscope_property_agentProfile $introscopeProfile
+}
+
+# public : used  by dmgradmin instrument_introscope
+proc enableIntroscope { serverId introscopeAgentName introscopeDirectory introscopeProfile } {
+  enableCustomPMI $serverId
+  enableIntroscopeInternal $serverId $introscopeAgentName $introscopeDirectory $introscopeProfile
+}
+
+proc applyInstrumentWorkaround { jvm } {
+  global prm_instrument_checkJVMScript prm_instrument_jvmArgWorkaround
+  set result [exec "$prm_instrument_checkJVMScript"]
+  if { $result == "OK" } {
+    puts "JVM not affected by IZ99243"
+  } else {
+    puts "JVM affected by IZ99243 -> applying workaround '$prm_instrument_jvmArgWorkaround'"
+    appendJVMArguments $jvm $prm_instrument_jvmArgWorkaround
+  }
+}
+proc enableDynatraceInternal { serverId dynatraceAgentName dynatraceAgentPath dynatraceCollectorName dynatraceCollectorPort } {
+  global AdminConfig prm_dynatrace_default_agentPath prm_dynatrace_default_collectorName prm_dynatrace_default_collectorPort prm_JVM_BITNESS
+  if { $dynatraceAgentName == "DEFAULT" || $dynatraceAgentName == "_" } {
+    set dynatraceAgentName "\${WAS_SERVER_NAME}"
+  }
+  if { $prm_JVM_BITNESS == "32"} {
+    set prm_JVM_BITNESS ""
+  }
+  if { $dynatraceAgentPath == "DEFAULT" || $dynatraceAgentPath == "_" } {
+    set dynatraceAgentPath $prm_dynatrace_default_agentPath
+  } elseif { [regexp {^35$} $dynatraceAgentPath] } {
+    set dynatraceAgentPath "/apps/dynatrace/agent${dynatraceAgentPath}/lib${prm_JVM_BITNESS}/libdtagent.so"
+  } elseif { [regexp {^[1-9][0-9]$} $dynatraceAgentPath] } {
+    set dynatraceAgentPath "/apps/dynatrace${dynatraceAgentPath}/agent/lib${prm_JVM_BITNESS}/libdtagent.so"
+  } else {
+    puts  "dynatraceAgentPath=$dynatraceAgentPath"
+  }
+  if { $dynatraceCollectorName == "DEFAULT" || $dynatraceCollectorName == "_" } {
+    set dynatraceCollectorName $prm_dynatrace_default_collectorName
+  } else {
+    puts "dynatraceCollectorName=$dynatraceCollectorName"
+  }
+  if { $dynatraceCollectorPort == "DEFAULT" || $dynatraceCollectorPort == "_" } {
+    set dynatraceCollectorPort $prm_dynatrace_default_collectorPort
+  } else {
+    puts "dynatraceCollectorPort=$dynatraceCollectorPort"
+  }
+ 
+  disableInstrument $serverId
+  set serverName [$AdminConfig showAttribute $serverId name]
+  puts "Enabling dynatrace instrumentation for server '$serverName'"
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  set dynatraceArg "-agentpath:${dynatraceAgentPath}=name=${dynatraceAgentName},server=${dynatraceCollectorName}"
+  if { $dynatraceCollectorPort != $prm_dynatrace_default_collectorPort } {
+    set dynatraceArg "$dynatraceArg:${dynatraceCollectorPort}"
+  }
+  puts "dynaTrace arguments = $dynatraceArg"
+  appendJVMArguments $jvm $dynatraceArg
+  applyInstrumentWorkaround $jvm
+}
+
+# public : used by dmgradmin instrument_dynatrace 
+proc enableDynatrace { serverId dynatraceAgentName dynatraceAgentPath dynatraceCollectorName dynatraceCollectorPort } {
+  enableCustomPMI $serverId
+  enableDynatraceInternal $serverId $dynatraceAgentName $dynatraceAgentPath $dynatraceCollectorName $dynatraceCollectorPort
+}
+
+
+
+
+proc disableInstrument { serverId } {
+  global AdminConfig prm_introscope_property_agentName prm_introscope_property_agentProfile
+  set serverName [$AdminConfig showAttribute $serverId name]
+  puts "Disabling instrumentation for server '$serverName'"
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  instrument_clearJVMarguments $jvm
+  introscope_removeCustomService $serverId
+  removeJVMCustomProperty $serverId $prm_introscope_property_agentName
+  removeJVMCustomProperty $serverId $prm_introscope_property_agentProfile
+}
+
+proc applySharedClassesSettings {serverId} {
+  global AdminConfig
+  global prm_shared_classes prm_shared_classes_options prm_shared_classes_size
+
+  set jvm [$AdminConfig list JavaVirtualMachine $serverId]
+  sharedClasses_clearJVMarguments $jvm
+  if { $prm_shared_classes == "D" } {
+    puts "Shared classes -> default settings"
+    return
+  } elseif { $prm_shared_classes == "N" } {
+    set scArg "-Xshareclasses:none"
+  } elseif { $prm_shared_classes == "C" } {
+    set scArg "-Xshareclasses:${prm_shared_classes_options} -Xscmx${prm_shared_classes_size}M"
+  } else {
+    puts "ERROR : unknown value for prm_shared_classes -> $prm_shared_classes"
+    exit 1
+  }
+  set jvmargument [$AdminConfig showAttribute $jvm genericJvmArguments]
+  puts "applySharedClassesSettings:jvmargument=$jvmargument"
+  if { $jvmargument  == "" } {
+     set newArguments $scArg
+  } else {
+     set newArguments $jvmargument
+     append newArguments " " $scArg
+  }
+  set jvmargument "{ genericJvmArguments \"$newArguments\" }"
+  $AdminConfig modify $jvm $jvmargument
+  puts "Shared Classes -> setting jvm arguments to '$newArguments'"
+}
+
+
+proc instrument {serverId} {
+  global AdminConfig
+  global prm_instrumentationType prm_introscope_agentName prm_introscope_directory prm_introscope_profile
+  global prm_dynatrace_agentPath prm_dynatrace_agentName prm_dynatrace_collectorName prm_dynatrace_collectorPort
+
+
+  if { $prm_instrumentationType == "I" } {
+    enableIntroscopeInternal $serverId $prm_introscope_agentName $prm_introscope_directory $prm_introscope_profile
+  } elseif { $prm_instrumentationType == "D"} {
+    enableDynatraceInternal $serverId $prm_dynatrace_agentName $prm_dynatrace_agentPath $prm_dynatrace_collectorName $prm_dynatrace_collectorPort
+  } else {
+    disableInstrument $serverId
+  }
+}
+
+proc configExistingServer {nodeName serverName serverLogRoot} {
+  global AdminConfig prm_WAS_VERSION_NUM prm_webBindingAddress 
+  set serverId [$AdminConfig getid /Node:$nodeName/Server:$serverName/]
+  setServerConfig $serverId
+
+  if { $serverLogRoot != "DEFAULT" } {
+     puts "Setting logs root..."
+     setLogs $nodeName $serverName $serverLogRoot
+  }
+
+  if { $prm_WAS_VERSION_NUM >= 61 } {
+    global AdminTask
+    puts "Setting WC_defaulthost host to $prm_webBindingAddress..."
+    $AdminTask modifyServerPort $serverName [subst {-nodeName $nodeName -endPointName WC_defaulthost -host $prm_webBindingAddress -modifyShared true}]
+  }
+}
+
+proc configureDynamicCluster {clustId} {
+  global AdminConfig prm_dynClusterCustomProperties
+  $AdminConfig modify $clustId {{properties {}}}
+  if { $prm_dynClusterCustomProperties != "" } {
+    $AdminConfig modify $clustId [subst {{properties $prm_dynClusterCustomProperties}}]
+  }
+}
+
+proc setWebServerConfig {wServerId} {
+  global AdminConfig 
+  global prm_pluginlogFilename prm_pluginInstallRoot prm_pluginRefreshInterval prm_pluginLogLevel 
+  global prm_pluginProperties prm_pluginLoadBalance prm_pluginRetryInterval
+  global prm_webConfigurationFilename 
+
+  set pgin [$AdminConfig list PluginProperties $wServerId]
+  $AdminConfig modify $pgin [subst {{LogFilename $prm_pluginlogFilename}}]
+  $AdminConfig modify $pgin [subst {{PluginInstallRoot $prm_pluginInstallRoot}}]
+  $AdminConfig modify $pgin [subst {{RefreshInterval $prm_pluginRefreshInterval}}]
+  $AdminConfig modify $pgin [subst {{LogLevel $prm_pluginLogLevel}}]
+  $AdminConfig modify $pgin [subst {{PluginGeneration MANUAL}}]
+  $AdminConfig modify $pgin [subst {{PluginPropagation MANUAL}}]
+
+  $AdminConfig modify $pgin {{properties {}}}
+  if {$prm_pluginProperties != ""} {
+    $AdminConfig modify $pgin [subst {{properties $prm_pluginProperties}}]
+  }
+
+  set pscp [$AdminConfig list PluginServerClusterProperties $pgin]
+  $AdminConfig modify $pscp [subst {{LoadBalance $prm_pluginLoadBalance}}]
+  $AdminConfig modify $pscp [subst {{RetryInterval $prm_pluginRetryInterval}}]
+
+  set webServerId [$AdminConfig showAttribute $wServerId server]
+  set processDef [$AdminConfig list ProcessDef $webServerId]
+  $AdminConfig modify $processDef {{startCommandArgs {}}}
+  $AdminConfig modify $processDef {{stopCommandArgs {}}}
+  set startCmd "-k start -f $prm_webConfigurationFilename"
+  set stopCmd "-k stop -f $prm_webConfigurationFilename"
+  $AdminConfig modify $processDef [subst {{startCommandArgs {$startCmd}}}]
+  $AdminConfig modify $processDef [subst {{stopCommandArgs "$stopCmd"}}]
+}
+
+proc checkJVMGenericArguments {jvmargument} {
+
+  if { $jvmargument != "" } {
+    set jvmargumentEntries [split $jvmargument " "]
+
+    foreach arg $jvmargumentEntries {
+      if {$arg != "" && [regexp  "introscope|wily|dynatrace|libdtagent" $arg]} {
+        puts "ERROR : prm_jvmGenericArguments should not refer to introscope or dynatrace"
+        exit 1
+      }
+      if { [string first "-Xshareclasses" $arg]==0 } {
+        puts "ERROR : prm_jvmGenericArguments should not contain -Xshareclasses option"
+        exit 1
+      }
+      if { [string first "-Xgcpolicy:" $arg]==0 } {
+        puts "ERROR : prm_jvmGenericArguments should not contain -Xgcpolicy option"
+        exit 1
+      }
+       
+    }
+  }
+}
+
+proc configJVMClassLoader {serverId jvmClassLoader jvmClassLoaderMode jvmClassLoaderSharedLibrary} {
+  global AdminConfig
+  foreach cl [$AdminConfig list Classloader $serverId] {
+    $AdminConfig remove $cl
+  }
+  set appServerId [$AdminConfig list ApplicationServer $serverId]
+
+  set clId [$AdminConfig create Classloader $appServerId [subst {{mode $jvmClassLoaderMode}}]]
+  foreach lib $jvmClassLoaderSharedLibrary {
+    $AdminConfig create LibraryRef $clId [subst {{libraryName $lib} {sharedClassloader true}}]
+  }
+}
+
+# setServerConfig : point d'entree unique pour configurer un serveur d'appli ou un modele de cluster dynamique
+proc setServerConfig {serverId} {
+  global AdminConfig
+  global prm_initialHeapSize prm_maximumHeapSize prm_jvmprop prm_classpath prm_jvmGenericArguments
+  global prm_orbReqTO prm_orbLocReqTO
+  global prm_nbBackupLog prm_rolloverSize
+  global prm_wcprop prm_processEnv prm_gcPolicy
+  global prm_processPriority prm_umask prm_workingDirectory
+  global prm_tporbInactivityTimeout prm_tporbIsGrowable prm_tporbMaximumSize prm_tporbMinimumSize
+  global prm_tpwebInactivityTimeout prm_tpwebIsGrowable prm_tpwebMaximumSize prm_tpwebMinimumSize
+  global prm_WAS_VERSION prm_WAS_VERSION_NUM prm_nodeTempDir prm_pluginConnectTimeout
+  global prm_clientInactivityTimeout prm_totalTranLifetimeTimeout prm_transactionLogDirectory prm_enableHAManagerService prm_enableJavaAttachAPI
+  global prm_sessionPersistenceMode prm_sessionPersistenceDataSource prm_sessionPersistenceUser prm_sessionPersistencePassword
+  global prm_jvmClassLoader prm_jvmClassLoaderMode prm_jvmClassLoaderSharedLibrary
+
+  checkJVMGenericArguments $prm_jvmGenericArguments
+  
+  puts $serverId
+  puts "Setting JVM parameters..."
+  setJVM1 $serverId $prm_initialHeapSize $prm_maximumHeapSize $prm_jvmprop $prm_classpath $prm_jvmGenericArguments
+
+  puts "Setting ORB properties"
+  setORB $serverId $prm_orbReqTO $prm_orbLocReqTO $prm_WAS_VERSION
+  
+  # Change WAS temporary directory
+  if { $prm_nodeTempDir != "DEFAULT" } {
+     puts "Setting WAS temporary directory..."
+     setSystemProperty $serverId $prm_nodeTempDir
+  }
+
+  puts "Setting nb backup logs..."
+  setBckup $serverId $prm_nbBackupLog $prm_rolloverSize
+
+  if { $prm_wcprop != "" } {
+    puts "Setting webContainer properties : $prm_wcprop"
+    setWebContainerProps $serverId $prm_wcprop
+  }
+  puts "Setting web server plugin properties..."
+  set webPlugin [$AdminConfig list WebserverPluginSettings $serverId]
+  puts "$webPlugin"
+  $AdminConfig modify $webPlugin [subst {{ConnectTimeout $prm_pluginConnectTimeout}}]
+
+  if { $prm_processEnv != "" } {
+    puts "Setting process Environement : $prm_processEnv"
+    setEnv $serverId $prm_processEnv
+  }
+  puts "Setting process Execution properties"
+  setProcessExecution $serverId
+
+  foreach tp [$AdminConfig list ThreadPool $serverId] {
+    set name [$AdminConfig showAttribute $tp name]
+    if { $name == "ORB.thread.pool" } {
+      puts "Setting $name properties"
+      setThreadPoolProperties $tp $prm_tporbInactivityTimeout $prm_tporbIsGrowable $prm_tporbMaximumSize $prm_tporbMinimumSize
+    }
+    if { $name == "WebContainer" } {
+      puts "Setting WebContainer thread pool properties"
+      setThreadPoolProperties $tp $prm_tpwebInactivityTimeout $prm_tpwebIsGrowable $prm_tpwebMaximumSize $prm_tpwebMinimumSize
+    }
+  }
+  
+  puts "Setting transaction service properties : inactivity timeout = $prm_clientInactivityTimeout, transaction timeout = $prm_totalTranLifetimeTimeout"
+  set tranId [$AdminConfig list TransactionService $serverId]
+  set tranattrs [ list [ list clientInactivityTimeout $prm_clientInactivityTimeout] [list totalTranLifetimeTimeout $prm_totalTranLifetimeTimeout] ]
+  if { $prm_transactionLogDirectory != "DEFAULT" } {
+    puts "setting tranlog directory : $prm_transactionLogDirectory"
+    lappend tranattrs [list transactionLogDirectory $prm_transactionLogDirectory]
+  }
+  $AdminConfig modify $tranId $tranattrs
+
+  if { $prm_enableHAManagerService == "false" } {
+    puts "disabling HAManager Service"
+  } else { 
+    puts "enabling HAManager Service"
+  }
+  set hmgrId [$AdminConfig list HAManagerService $serverId]
+  $AdminConfig modify $hmgrId [subst {{enable $prm_enableHAManagerService}}]
+
+  if { $prm_WAS_VERSION_NUM >= 70 } {
+    setAttachAPI $serverId $prm_enableJavaAttachAPI
+  }
+  if { $prm_WAS_VERSION_NUM >= 61 } {
+    enableCustomPMI $serverId
+    instrument $serverId
+    applySharedClassesSettings $serverId
+    setGcPolicy $serverId $prm_gcPolicy
+    removeRMIConnector $serverId
+  }
+  
+  # positionne le repertoire de travail
+  set processDef [$AdminConfig list ProcessDef $serverId]
+  puts "Setting working directory to '$prm_workingDirectory'"
+  $AdminConfig modify $processDef [subst {{workingDirectory "$prm_workingDirectory"}}]
+
+  # session persistence
+  set sm [$AdminConfig list SessionManager $serverId] 
+  if { $prm_sessionPersistenceMode == "N" } {
+    puts "Disabling session persistence"
+    $AdminConfig modify $sm {{sessionPersistenceMode "NONE"}}
+  } elseif {$prm_sessionPersistenceMode == "DB" } {
+    puts "Enable session persistence to Database"
+    $AdminConfig modify $sm {{sessionPersistenceMode "DATABASE"}}
+    set sesdb [$AdminConfig list SessionDatabasePersistence $sm]
+    $AdminConfig modify $sesdb [subst { {userId "$prm_sessionPersistenceUser"} {password "$prm_sessionPersistencePassword"} {tableSpaceName ""} {datasourceJNDIName "$prm_sessionPersistenceDataSource"} }]
+  }
+  if { $prm_WAS_VERSION_NUM >= 61 } {
+    configJVMClassLoader $serverId $prm_jvmClassLoader $prm_jvmClassLoaderMode $prm_jvmClassLoaderSharedLibrary
+  } 
+}
+
+
+proc stopAppServers {appServerList timeoutStop} {
+  global AdminControl
+  set i 0
+  set listServerToStop ""
+  while {$i < [llength $appServerList]} {
+    set node [lindex [lindex $appServerList $i] 0]
+    set server [lindex [lindex $appServerList $i] 1]
+
+    set serverBean [$AdminControl completeObjectName type=Server,processType=ManagedProcess,node=$node,process=$server,*]
+    if { $serverBean == "" } {
+       puts "Warning : server $node/$server NOT running !"
+    } else {
+      puts "Stopping Application Server $server on node $node..."
+      if { [ catch { $AdminControl invoke $serverBean stop } result ] } {
+        puts "Warning : unable to stop gracefully server $node/$server : '$result', trying to kill it"
+        if { [ catch { $AdminControl stopServer $server $node terminate} result ] } {
+          puts "!!! ERROR : unable to terminate server $node/$server"
+        } else {
+           puts "OK : server $node/$server terminated"
+        }
+      } else {
+        lappend listServerToStop [list $node $server]
+      }
+    }
+    set i [expr $i + 1]
+  }
+  set nbServerToStop [llength $listServerToStop]
+  set totalNbServerToStop $nbServerToStop
+  set chrono 0
+  set timeout $timeoutStop
+  puts "INFO : timeout set to $timeout seconds"
+  while { $nbServerToStop > 0 && $chrono < $timeout } {
+    after 10000
+    set chrono [expr $chrono + 10]
+    set oldListServerToStop $listServerToStop
+    set listServerToStop ""
+
+    for {set i 0} {$i < $nbServerToStop} {incr i 1} {
+      set node [lindex [lindex $oldListServerToStop $i] 0]
+      set server [lindex [lindex $oldListServerToStop $i] 1]
+      set serverBean [$AdminControl completeObjectName type=Server,processType=ManagedProcess,node=$node,process=$server,*]
+      if { $serverBean == "" } {
+        puts "OK : server $node/$server stopped."
+      } else {
+        puts "Server $node/$server still running.... Waiting $chrono / $timeout seconds."
+        lappend listServerToStop [list $node $server]
+      }
+    }
+    set nbServerToStop [llength $listServerToStop]
+  }
+  set nbServerToStop [llength $listServerToStop]
+  set nbStillRunning 0
+  for {set i 0} {$i < $nbServerToStop} {incr i 1} {
+    set node [lindex [lindex $oldListServerToStop $i] 0]
+    set server [lindex [lindex $oldListServerToStop $i] 1]
+    set serverBean [$AdminControl completeObjectName type=Server,processType=ManagedProcess,node=$node,process=$server,*]
+    if { $serverBean == "" } {
+      puts "OK : server $node/$server stopped."
+    } else {
+      puts "Warning : unable to stop gracefully server $node/$server, trying to kill it"
+      if { [ catch { $AdminControl stopServer $server $node terminate} result ] } {
+        puts "Warning : error while terminating server $node/$server : $result"
+        set tstBean [$AdminControl completeObjectName type=Server,processType=ManagedProcess,node=$node,process=$server,*]
+        if { $tstBean == "" } {
+          puts "OK : server $node/$server terminated"
+        } else {
+          puts "!!! ERROR : unable to terminate server $node/$server"
+          incr nbStillRunning
+        }
+      } else {
+        puts "OK : server $node/$server terminated"
+      }
+    }
+  }
+  puts ""
+  if {$nbStillRunning == 0} {
+    puts "OK : all application servers stopped : $totalNbServerToStop / $totalNbServerToStop"
+  } else {
+    puts "ERROR : unable to stop $nbStillRunning / $totalNbServerToStop"
+    exit 1
+  }
+}
+
+
+# ------------------- Resource Environment Entry
+
+
+# scopeId			: Niveau ou chercher l'objet
+# jndiName			: nom JNDI de l'objet ResourceEnvEntry 
+# retourne l'objet ResourceEnvEntry de nom jndiName dans le scope donne si il existe  
+#######################################################################################
+proc findResourceEnvEntry { scopeId jndiName } {
+  global AdminConfig
+  foreach ree [$AdminConfig list ResourceEnvEntry $scopeId] {
+    set ix [string first [$AdminConfig showAttribute $scopeId name]|res $ree]
+    if {$ix != -1} {
+      set currentJndiName   [$AdminConfig showAttribute $ree jndiName]
+      if { $currentJndiName == $jndiName } {
+        return $ree
+      }
+    }
+  }
+  return 
+}
+
+# scopeId                       : Niveau ou chercher l'objet
+# providerName                  : nom du ResourceEnvEntry provider
+# retourne le ResourceEnvEntry Provider de nom providerName dans le scope donne si il existe
+#######################################################################################
+
+proc findResourceEnvEntryProvider { scopeId providerName } {
+  global AdminConfig
+  set providerEntries [$AdminConfig list ResourceEnvironmentProvider $scopeId]
+
+  foreach providerEntry $providerEntries {
+    set ix [string first [$AdminConfig showAttribute $scopeId name]|res $providerEntry]
+    if {$ix != -1} {
+      set currentProviderName [$AdminConfig showAttribute $providerEntry name]
+      if {  [string compare $providerName $currentProviderName] == 0 } {
+        return $providerEntry
+      }
+    }
+  }
+  return
+}
+
+proc findReferenceable {  rep factoryClassname classname } {
+  global AdminConfig
+  foreach referenceable [$AdminConfig showAttribute $rep referenceables] {
+    if {$referenceable != ""} {
+      set currentClassname [$AdminConfig showAttribute $referenceable classname]
+      set currentFactoryClassname [$AdminConfig showAttribute $referenceable factoryClassname]
+      if {$currentClassname == $classname && $currentFactoryClassname == $factoryClassname} {				
+        return $referenceable
+      }
+    }
+  }
+  return 
+}
+
+# str_prm       : Chaine contenant des escape sequences Unicode ou \n etc...
+# du type \uxxxx, par exemple pour l'euro \u20ac
+# retourne une chaine avec escape sequences remplacees
+# par le caractere unicode correspondant.
+###########################################################
+
+proc unescapeUnicode { str_prm } {
+
+  return [subst -nocommands -novariables $str_prm]
+}
+
+proc addCustomProperty { propset name value } {
+  global AdminConfig
+
+  set propName [list name $name]
+  # Creer la propriete en convertissant les escape sequences \uxxxx en caracteres unicode si besoin
+  set propValue [list value [unescapeUnicode $value]]
+  set propType [list type java.lang.String]
+
+  set rpAttrs [list $propName $propType $propValue]
+  $AdminConfig create J2EEResourceProperty $propset $rpAttrs
+}
+
+proc setVariable {scopeId varName varDesc varValue} {
+  global AdminConfig
+  set entries [$AdminConfig list VariableSubstitutionEntry $scopeId]
+  foreach entry $entries {
+    set currentName [$AdminConfig showAttribute $entry symbolicName]
+    if { $currentName == $varName } {
+      puts "Variable $varName already exists"
+      $AdminConfig remove $entry
+    }
+  }
+  set nameattr [list symbolicName $varName]
+  set valattr [list value $varValue]
+  set descattr [list description $varDesc]
+  set attrs [list $nameattr $valattr $descattr]
+  $AdminConfig create VariableSubstitutionEntry $scopeId $attrs
+}
+
+proc syncAllNodes {} {
+  global AdminControl
+  foreach node_sync [$AdminControl queryNames type=NodeSync,process=nodeagent,*] {
+    puts "Synchronization of node $node_sync"
+    $AdminControl invoke $node_sync sync
+  }
+}
+

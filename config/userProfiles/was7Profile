@@ -1,0 +1,5 @@
+export USER="was70"
+export prm_WAS_VERSION="70"
+export ADMINWEB="/apps/WebSphere/profiles7/dmgr/adminweb/config"
+export prm_WEB_SERVER_DIR="/apps/IBMHTTPServer/WebServer7"
+export prm_PLUGIN_DIR="/apps/WebSphere/WebPlugins7"

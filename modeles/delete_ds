@@ -1,0 +1,8 @@
+#!/bin/ksh
+
+echo ""
+echo "ds${indice}.JDBC_TYPE_ACTION=delete"
+echo "ds${indice}.JDBC_JNDI_APPLI=jdbc/"
+echo "ds${indice}.JDBC_ALIAS_USER="
+echo "ds${indice}.JDBC_ALIAS_PASS="
+echo ""

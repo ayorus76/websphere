@@ -1,0 +1,7 @@
+#!/bin/ksh
+
+echo ""
+echo "ree${indice}.REE_TYPE_ACTION=create"
+echo "ree${indice}.REE_FACTORY_NAME="
+echo "ree${indice}.REE_CLASS_NAME="
+echo "ree${indice}.REE_ENTRY_JNDI_APPLI="

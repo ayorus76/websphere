@@ -1,0 +1,6 @@
+#!/bin/ksh
+
+echo ""
+echo "url${indice}.URL_TYPE_ACTION=delete"
+echo "url${indice}.URL_JNDI_APPLI=url/"
+echo ""
