@@ -1,0 +1,7 @@
+# Contains all files and folders to exclude from GIT tracking
+# Could be a simple file, some pattern files, folders.
+#
+# Examples :
+# file1
+# *file*
+# folder/
