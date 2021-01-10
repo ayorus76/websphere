@@ -2,12 +2,20 @@
 
 ## Introduction
 
-This project provides multiple scripts and tools to manage Websphere applications environment like :
+This project provides multiple scripts and tools to manage Websphere applications environment.
 
-- setting and creating a full application server from scratch using predefined properties files (application server, resources, webserver ...)
-- editing an existing application server configuration (adding, updating, removing resources, parameters ...)
 
 ## Functionalities details
+
+- setting and creating a full application server from scratch using predefined properties files:
+	-> create a customed application server
+	-> create a customed web server
+	-> create resources (jdbc, environment resource, user...)
+- editing an existing application server configuration:
+	-> update jvm parameters
+	-> update modules parameters
+	-> add, update, delete resources
+
 
 ## Supported Version
 
